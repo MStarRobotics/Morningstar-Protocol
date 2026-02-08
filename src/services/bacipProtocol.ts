@@ -204,7 +204,7 @@ export class BACIPProtocol {
     credential: VerifiableCredential,
     recipientPublicKey: string
   ): Promise<{ encrypted: { ciphertext: string; iv: string }; keyHex: string }> {
-    const key = generateAESKey();
+    const key = await generateAESKey();
     const encrypted = await encryptData(JSON.stringify(credential), key);
     
     // Export key for storage

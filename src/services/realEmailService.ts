@@ -30,7 +30,7 @@ class RealEmailService {
   private isConfigured = false;
 
   configure(config: EmailConfig): void {
-    this.transporter = nodemailer.createTransporter(config);
+    this.transporter = nodemailer.createTransport(config);
     this.isConfigured = true;
   }
 

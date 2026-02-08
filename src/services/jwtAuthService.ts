@@ -1,4 +1,4 @@
-import { sign, verify } from 'jsonwebtoken';
+import jwt from 'jsonwebtoken';
 
 export interface JWTPayload {
   sub: string; // subject (user ID)
@@ -28,7 +28,7 @@ class JWTAuthService {
       iss: options?.issuer || this.defaultIssuer
     };
 
-    return sign(fullPayload, this.secret, {
+    return jwt.sign(fullPayload, this.secret, {
       expiresIn: options?.expiresIn || '24h',
       algorithm: 'HS256'
     });
@@ -36,7 +36,7 @@ class JWTAuthService {
 
   verifyToken(token: string): JWTPayload {
     try {
-      return verify(token, this.secret, {
+      return jwt.verify(token, this.secret, {
         issuer: this.defaultIssuer
       }) as JWTPayload;
     } catch (error) {

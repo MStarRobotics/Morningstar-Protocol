@@ -7,6 +7,7 @@ import { merkleTreeService } from '../src/services/merkleTreeService';
 import { jwtAuthService } from '../src/services/jwtAuthService';
 import { performanceMonitor } from '../src/services/performanceMonitor';
 import { channelService } from '../src/services/channelService';
+import type { Credential } from '../src/types';
 
 describe('Integration Test: Complete Credential Lifecycle', () => {
   beforeEach(() => {
@@ -25,9 +26,13 @@ describe('Integration Test: Complete Credential Lifecycle', () => {
     expect(jwtAuthService.hasPermission(issuerToken, 'issue:credentials')).toBe(true);
 
     // 2. Issue credential with all features
-    const credential = {
+    const credential: Credential = {
       id: 'cred-integration-test',
       type: 'AcademicCredential',
+      issuer: 'did:pistis:university',
+      issuanceDate: new Date().toISOString(),
+      recipient: 'did:pistis:student',
+      status: 'active',
       data: {
         degree: 'Bachelor of Science',
         major: 'Computer Science',
@@ -102,9 +107,13 @@ describe('Integration Test: Complete Credential Lifecycle', () => {
     expect(jwtAuthService.hasRole(verifierToken, 'verifier')).toBe(true);
 
     // 2. Issue a credential first
-    const credential = {
+    const credential: Credential = {
       id: 'cred-verify-test',
       type: 'AcademicCredential',
+      issuer: 'did:pistis:university',
+      issuanceDate: new Date().toISOString(),
+      recipient: 'did:pistis:student',
+      status: 'active',
       data: { degree: 'Master of Science' },
       hiddenData: {}
     };
