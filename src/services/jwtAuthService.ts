@@ -1,0 +1,72 @@
+import { sign, verify } from 'jsonwebtoken';
+
+export interface JWTPayload {
+  sub: string; // subject (user ID)
+  role: 'admin' | 'issuer' | 'verifier' | 'student';
+  permissions: string[];
+  iat?: number; // issued at
+  exp?: number; // expiration
+  iss?: string; // issuer
+}
+
+export interface JWTOptions {
+  expiresIn?: string;
+  issuer?: string;
+}
+
+class JWTAuthService {
+  private readonly secret: string;
+  private readonly defaultIssuer = 'morningstar-credentials';
+
+  constructor() {
+    this.secret = import.meta.env.VITE_JWT_SECRET || 'dev-secret-key-change-in-production';
+  }
+
+  generateToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'iss'>, options?: JWTOptions): string {
+    const fullPayload: JWTPayload = {
+      ...payload,
+      iss: options?.issuer || this.defaultIssuer
+    };
+
+    return sign(fullPayload, this.secret, {
+      expiresIn: options?.expiresIn || '24h',
+      algorithm: 'HS256'
+    });
+  }
+
+  verifyToken(token: string): JWTPayload {
+    try {
+      return verify(token, this.secret, {
+        issuer: this.defaultIssuer
+      }) as JWTPayload;
+    } catch (error) {
+      throw new Error('Invalid or expired token');
+    }
+  }
+
+  hasPermission(token: string, requiredPermission: string): boolean {
+    try {
+      const payload = this.verifyToken(token);
+      return payload.permissions.includes(requiredPermission);
+    } catch {
+      return false;
+    }
+  }
+
+  hasRole(token: string, requiredRole: JWTPayload['role']): boolean {
+    try {
+      const payload = this.verifyToken(token);
+      return payload.role === requiredRole;
+    } catch {
+      return false;
+    }
+  }
+
+  refreshToken(token: string): string {
+    const payload = this.verifyToken(token);
+    const { iat, exp, iss, ...rest } = payload;
+    return this.generateToken(rest);
+  }
+}
+
+export const jwtAuthService = new JWTAuthService();

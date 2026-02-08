@@ -1,0 +1,7 @@
+{
+  "name": "@veramo/credential-ld",
+  "version": "6.999.0",
+  "description": "Noop stub replacing @veramo/credential-ld to eliminate elliptic vulnerability chain",
+  "main": "index.js",
+  "types": "index.d.ts"
+}
