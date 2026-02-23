@@ -172,7 +172,7 @@ describe('DID Service', () => {
 
     it('should store metadata retrievable via getDIDMetadata', async () => {
       const { did, meta } = await createAndRegister('meta-test', 'issuer');
-      const retrieved = getDIDMetadata(did);
+      const retrieved = await getDIDMetadata(did);
 
       expect(retrieved).not.toBeNull();
       expect(retrieved!.did).toBe(did);
@@ -183,7 +183,7 @@ describe('DID Service', () => {
     it('should add DID to the global index', async () => {
       await createAndRegister('index-a', 'student');
       await createAndRegister('index-b', 'issuer');
-      const allDIDs = getAllDIDs();
+      const allDIDs = await getAllDIDs();
 
       expect(allDIDs).toHaveLength(2);
       expect(allDIDs.map((d) => d.role)).toContain('student');
@@ -328,9 +328,9 @@ describe('DID Service', () => {
         await registerDID(doc, meta);
       }
 
-      const students = searchDIDsByRole('student');
-      const issuers = searchDIDsByRole('issuer');
-      const verifiers = searchDIDsByRole('verifier');
+      const students = await searchDIDsByRole('student');
+      const issuers = await searchDIDsByRole('issuer');
+      const verifiers = await searchDIDsByRole('verifier');
 
       expect(students).toHaveLength(2);
       expect(issuers).toHaveLength(1);
@@ -487,7 +487,7 @@ describe('DID Service', () => {
 
       const resolved = await resolveDID(did);
       expect(resolved).toBeNull();
-      expect(getAllDIDs()).toHaveLength(0);
+      expect(await getAllDIDs()).toHaveLength(0);
     });
   });
 });

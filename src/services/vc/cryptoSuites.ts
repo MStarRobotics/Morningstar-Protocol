@@ -12,7 +12,12 @@
  */
 
 import * as ed from '@noble/ed25519';
-import { sha256, generateKeyPair as generateP256KeyPair, createSignature, verifySignature } from '../cryptography';
+import {
+  sha256,
+  generateKeyPair as generateP256KeyPair,
+  createSignature,
+  verifySignature,
+} from '../cryptography';
 import type { VCKeyPair, ProofType } from './types';
 import { logger } from '../logger';
 
@@ -47,7 +52,10 @@ export async function generateEd25519KeyPair(controller: string): Promise<VCKeyP
 /**
  * Sign data with an Ed25519 private key.
  */
-export async function signEd25519(data: string | Uint8Array, privateKey: Uint8Array): Promise<Uint8Array> {
+export async function signEd25519(
+  data: string | Uint8Array,
+  privateKey: Uint8Array,
+): Promise<Uint8Array> {
   const message = typeof data === 'string' ? new TextEncoder().encode(data) : data;
   return await ed.signAsync(message, privateKey);
 }
@@ -58,7 +66,7 @@ export async function signEd25519(data: string | Uint8Array, privateKey: Uint8Ar
 export async function verifyEd25519(
   data: string | Uint8Array,
   signature: Uint8Array,
-  publicKey: Uint8Array
+  publicKey: Uint8Array,
 ): Promise<boolean> {
   const message = typeof data === 'string' ? new TextEncoder().encode(data) : data;
   return await ed.verifyAsync(signature, message, publicKey);
@@ -94,7 +102,11 @@ export async function signP256(data: string, privateKey: CryptoKey): Promise<str
 /**
  * Verify an ECDSA P-256 signature (wraps existing cryptography.ts).
  */
-export async function verifyP256(data: string, signature: string, publicKey: CryptoKey): Promise<boolean> {
+export async function verifyP256(
+  data: string,
+  signature: string,
+  publicKey: CryptoKey,
+): Promise<boolean> {
   return await verifySignature(data, signature, publicKey);
 }
 
@@ -107,7 +119,7 @@ export async function verifyP256(data: string, signature: string, publicKey: Cry
  */
 export async function generateKeyPairForProof(
   controller: string,
-  proofType: ProofType = 'Ed25519Signature2020'
+  proofType: ProofType = 'Ed25519Signature2020',
 ): Promise<VCKeyPair> {
   switch (proofType) {
     case 'Ed25519Signature2020':
@@ -130,7 +142,7 @@ export async function createProof(
   keyPair: VCKeyPair,
   proofPurpose: string = 'assertionMethod',
   challenge?: string,
-  domain?: string
+  domain?: string,
 ): Promise<{
   type: string;
   created: string;
@@ -181,7 +193,7 @@ export async function verifyProof(
     verificationMethod: string;
     challenge?: string;
   },
-  publicKey: Uint8Array | CryptoKey
+  publicKey: Uint8Array | CryptoKey,
 ): Promise<boolean> {
   const dataToVerify = proof.challenge ? data + proof.challenge : data;
 
@@ -205,7 +217,9 @@ export async function verifyProof(
 
 /** Convert bytes to hex string. */
 export function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /** Convert hex string to bytes. */
@@ -221,57 +235,53 @@ export function hexToBytes(hex: string): Uint8Array {
 // Base58 alphabet (Bitcoin)
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
-/** Convert bytes to base58 string. */
+/** Convert bytes to base58 string using BigInt. */
 export function bytesToBase58(bytes: Uint8Array): string {
-  const digits = [0];
+  let x = BigInt(0);
   for (const byte of bytes) {
-    let carry = byte;
-    for (let j = 0; j < digits.length; j++) {
-      carry += digits[j] << 8;
-      digits[j] = carry % 58;
-      carry = (carry / 58) | 0;
-    }
-    while (carry > 0) {
-      digits.push(carry % 58);
-      carry = (carry / 58) | 0;
-    }
+    x = x * 256n + BigInt(byte);
   }
-  // Leading zeros
+
   let output = '';
+  while (x > 0n) {
+    const mod = Number(x % 58n);
+    x = x / 58n;
+    output = BASE58_ALPHABET[mod] + output;
+  }
+
+  // Leading zeros
   for (const byte of bytes) {
-    if (byte === 0) output += BASE58_ALPHABET[0];
+    if (byte === 0) output = BASE58_ALPHABET[0] + output;
     else break;
   }
-  // Convert digits (stored in reverse) to base58 string
-  for (let i = digits.length - 1; i >= 0; i--) {
-    output += BASE58_ALPHABET[digits[i]];
-  }
+
   return output;
 }
 
-/** Convert base58 string to bytes. */
+/** Convert base58 string to bytes using BigInt. */
 export function base58ToBytes(str: string): Uint8Array {
-  const bytes: number[] = [0];
+  if (str.length === 0) return new Uint8Array(0);
+
+  let x = BigInt(0);
   for (const char of str) {
     const value = BASE58_ALPHABET.indexOf(char);
     if (value < 0) throw new Error(`Invalid base58 character: ${char}`);
-    let carry = value;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
+    x = x * 58n + BigInt(value);
   }
-  // Leading ones
+
+  const bytes: number[] = [];
+  while (x > 0n) {
+    bytes.unshift(Number(x % 256n));
+    x = x / 256n;
+  }
+
+  // Leading ones (which map to zero bytes)
   for (const char of str) {
-    if (char === BASE58_ALPHABET[0]) bytes.push(0);
+    if (char === BASE58_ALPHABET[0]) bytes.unshift(0);
     else break;
   }
-  return new Uint8Array(bytes.reverse());
+
+  return new Uint8Array(bytes);
 }
 
 /**

@@ -25,7 +25,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createTransport } from 'nodemailer';
-import { basename } from 'path';
+import { basename, join, dirname } from 'path';
+import { promises as fs } from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -285,6 +290,253 @@ app.post('/api/ipfs/pin', credentialLimiter, async (req, res) => {
     console.error('[proxy] IPFS pin error:', error.message || error);
     res.status(502).json({ error: 'Pin request failed' });
   }
+});
+
+// ---------------------------------------------------------------------------
+// DID Registry (File-based Persistence)
+// ---------------------------------------------------------------------------
+
+const DATA_DIR = join(__dirname, 'data');
+const DID_FILE = join(DATA_DIR, 'dids.json');
+
+// Ensure data directory exists
+(async () => {
+    try {
+        await fs.mkdir(DATA_DIR, { recursive: true });
+        try {
+            await fs.access(DID_FILE);
+        } catch {
+            await fs.writeFile(DID_FILE, JSON.stringify([], null, 2));
+        }
+    } catch (err) {
+        console.error('[server] Failed to initialize data directory:', err);
+    }
+})();
+
+async function readDIDs() {
+    try {
+        const data = await fs.readFile(DID_FILE, 'utf-8');
+        return JSON.parse(data);
+    } catch (error) {
+        return [];
+    }
+}
+
+async function writeDIDs(dids) {
+    await fs.writeFile(DID_FILE, JSON.stringify(dids, null, 2));
+}
+
+// GET /api/did - List all DIDs (for admin/search)
+app.get('/api/did', async (req, res) => {
+    try {
+        const dids = await readDIDs();
+        // Return simplified list or full objects? 
+        // usage in didService: getAllDIDs returns { did, created, role }
+        // The storage format is { id, document, metadata, ... }
+        const result = dids.map(d => ({
+            did: d.id,
+            created: d.created,
+            role: d.metadata?.role || 'unknown'
+        }));
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to list DIDs' });
+    }
+});
+
+// GET /api/did/:did - Retrieve DID Document
+app.get('/api/did/:did', async (req, res) => {
+    const { did } = req.params;
+    const dids = await readDIDs();
+    const doc = dids.find(d => d.id === did || d.did === did); // Support both formats
+    
+    if (doc) {
+        // If stored as full object with metadata wrapper, return just the doc part or normalized
+        // Based on didService, we might be storing the document and metadata separately.
+        // For simplicity in this file-based backend, let's assume we store an array of { document, metadata }.
+        res.json(doc);
+    } else {
+        res.status(404).json({ error: 'DID not found' });
+    }
+});
+
+// POST /api/did - Register new DID
+app.post('/api/did', credentialLimiter, async (req, res) => {
+    const { didDocument, metadata } = req.body;
+    if (!didDocument || !didDocument.id) {
+        return res.status(400).json({ error: 'Invalid DID Document' });
+    }
+
+    const dids = await readDIDs();
+    if (dids.some(d => d.id === didDocument.id)) {
+        return res.status(409).json({ error: 'DID already exists' });
+    }
+
+    const newEntry = {
+        id: didDocument.id,
+        document: didDocument,
+        metadata: metadata || {},
+        created: new Date().toISOString(),
+        updated: new Date().toISOString()
+    };
+
+    dids.push(newEntry);
+    await writeDIDs(dids);
+
+    console.log(`[DID] Registered ${didDocument.id}`);
+    res.status(201).json({ success: true, did: didDocument.id });
+});
+
+// PUT /api/did/:did - Update DID Document
+app.put('/api/did/:did', credentialLimiter, async (req, res) => {
+    const { did } = req.params;
+    const { didDocument, metadata } = req.body;
+
+    const dids = await readDIDs();
+    const index = dids.findIndex(d => d.id === did);
+    
+    if (index === -1) {
+        return res.status(404).json({ error: 'DID not found' });
+    }
+
+    const entry = dids[index];
+    
+    // Update fields
+    if (didDocument) entry.document = { ...entry.document, ...didDocument };
+    if (metadata) entry.metadata = { ...entry.metadata, ...metadata };
+    entry.updated = new Date().toISOString();
+
+    dids[index] = entry;
+    await writeDIDs(dids);
+
+    console.log(`[DID] Updated ${did}`);
+    res.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// Blockchain Persistence (File-based Simulation)
+// ---------------------------------------------------------------------------
+
+const BLOCKCHAIN_FILE = join(DATA_DIR, 'blockchain.json');
+const PRIVATE_CHAIN_FILE = join(DATA_DIR, 'private_chain.json');
+
+async function readJSON(file) {
+    try {
+        const data = await fs.readFile(file, 'utf-8');
+        return JSON.parse(data);
+    } catch {
+        return null;
+    }
+}
+
+async function writeJSON(file, data) {
+    await fs.writeFile(file, JSON.stringify(data, null, 2));
+}
+
+// POST /api/blockchain/transaction - Submit transaction to public chain
+app.post('/api/blockchain/transaction', credentialLimiter, async (req, res) => {
+    const { transaction } = req.body;
+    if (!transaction || !transaction.id) return res.status(400).json({ error: 'Invalid transaction' });
+
+    let chainData = await readJSON(BLOCKCHAIN_FILE) || { chain: [], pending: [] };
+    chainData.pending.push(transaction);
+    await writeJSON(BLOCKCHAIN_FILE, chainData);
+    
+    res.json({ success: true, txId: transaction.id });
+});
+
+// POST /api/blockchain/block - Mine block (Simulation)
+app.post('/api/blockchain/block', credentialLimiter, async (req, res) => {
+    const { validator } = req.body;
+    let chainData = await readJSON(BLOCKCHAIN_FILE) || { chain: [], pending: [] };
+    
+    if (chainData.pending.length === 0) return res.json({ success: false, message: 'No pending transactions' });
+    
+    const newBlock = {
+        index: chainData.chain.length,
+        timestamp: new Date().toISOString(),
+        transactions: chainData.pending,
+        validator,
+        previousHash: chainData.chain.length > 0 ? chainData.chain[chainData.chain.length - 1].hash : '0'
+    };
+    
+    // Simple hash simulation
+    const { createHash } = await import('crypto');
+    newBlock.hash = createHash('sha256').update(JSON.stringify(newBlock)).digest('hex');
+    
+    chainData.chain.push(newBlock);
+    chainData.pending = []; // Clear pending
+    
+    await writeJSON(BLOCKCHAIN_FILE, chainData);
+    res.json({ success: true, block: newBlock });
+});
+
+// POST /api/blockchain/private/store - Store sensitive data
+app.post('/api/blockchain/private/store', credentialLimiter, async (req, res) => {
+    const { credentialId, encryptedData } = req.body;
+    let privateData = await readJSON(PRIVATE_CHAIN_FILE) || {};
+    
+    privateData[credentialId] = encryptedData;
+    await writeJSON(PRIVATE_CHAIN_FILE, privateData);
+    
+    res.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// Email Notification
+// ---------------------------------------------------------------------------
+
+// POST /api/email/notify - Send notification
+app.post('/api/email/notify', mfaLimiter, async (req, res) => {
+    const { to, subject, body } = req.body;
+    
+    // Logic similar to send-otp but generic
+    const transport = getMailTransport();
+    if (transport) {
+        try {
+            await transport.sendMail({
+                from: process.env.SMTP_FROM || process.env.SMTP_USER,
+                to,
+                subject,
+                text: body,
+            });
+            return res.json({ success: true });
+        } catch (err) {
+            console.error('[email] Failed to send:', err);
+            return res.status(500).json({ error: 'Email failed' });
+        }
+    }
+    
+    // Log for dev/demo if no SMTP
+    console.log(`[EMAIL-MOCK] To: ${to} | Subject: ${subject} | Body: ${body.substring(0, 50)}...`);
+    res.json({ success: true, mock: true });
+});
+
+// DELETE /api/did/:did - Revoke/Delete DID
+app.delete('/api/did/:did', credentialLimiter, async (req, res) => {
+    const { did } = req.params;
+    const dids = await readDIDs();
+    const index = dids.findIndex(d => d.id === did);
+
+    if (index === -1) {
+        return res.status(404).json({ error: 'DID not found' });
+    }
+
+    // Instead of hard delete, we often mark as deactivated in DID world, 
+    // but for this API let's support "Revoke" meaning "Deactivate" 
+    // or just "Delete" if valid cleanup is needed.
+    // The previous localStorage implementation had `revokeDID` which set deactivated: true.
+    
+    const entry = dids[index];
+    entry.document = { ...entry.document, deactivated: true };
+    entry.metadata = { ...entry.metadata, status: 'revoked' };
+    entry.updated = new Date().toISOString();
+
+    dids[index] = entry;
+    await writeDIDs(dids);
+
+    console.log(`[DID] Revoked ${did}`);
+    res.json({ success: true });
 });
 
 // ---------------------------------------------------------------------------

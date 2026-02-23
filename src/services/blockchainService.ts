@@ -1,14 +1,20 @@
 /**
  * Dual-Blockchain Architecture Service
  * Implements Public and Private Blockchain separation as per ZKBAR-V
- * 
+ *
  * Public Chain: Stores credential hashes, verification proofs, revocation status
  * Private Chain: Stores sensitive academic data, encrypted credentials
- * 
+ *
  * Based on: MDPI Sensors 2025 - Zero-Knowledge Proof-Enabled Blockchain
  */
 
-import { sha256, createSignature, generateKeyPair, encryptData, generateAESKey } from './cryptography';
+import {
+  sha256,
+  createSignature,
+  generateKeyPair,
+  encryptData,
+  generateAESKey,
+} from './cryptography';
 import { generateZKProof, ZKProof } from './zkProof';
 import { Credential } from '../types';
 import { logger } from './logger';
@@ -21,6 +27,40 @@ import { serialNumberService } from './serialNumberService';
 import { emailService } from './emailService';
 import { merkleTreeService } from './merkleTreeService';
 import { performanceMonitor } from './performanceMonitor';
+import { env } from './env';
+
+const persistenceWarnings = new Set<string>();
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const rootCode = (error as { code?: unknown }).code;
+  if (typeof rootCode === 'string') return rootCode;
+  const causeCode = (error as { cause?: { code?: unknown } }).cause?.code;
+  if (typeof causeCode === 'string') return causeCode;
+  return undefined;
+}
+
+function isExpectedBackendOfflineError(error: unknown): boolean {
+  const code = getErrorCode(error);
+  if (!code) return error instanceof TypeError;
+  return ['ECONNREFUSED', 'EPERM', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT'].includes(code);
+}
+
+function logPersistenceFallback(
+  key: string,
+  message: string,
+  error: unknown,
+): void {
+  const expectedOffline = isExpectedBackendOfflineError(error);
+  if (env.mode === 'test' && expectedOffline) {
+    if (persistenceWarnings.has(key)) return;
+    persistenceWarnings.add(key);
+    logger.info(`${message} (suppressing repeated warnings in test mode)`);
+    return;
+  }
+
+  logger.warn(message, error);
+}
 
 // ==================== BLOCKCHAIN TYPES ====================
 
@@ -76,7 +116,7 @@ export class PublicBlockchain {
       previousHash: '0',
       hash: '0000000000000000000000000000000000000000000000000000000000000000',
       nonce: 0,
-      merkleRoot: '0'
+      merkleRoot: '0',
     };
   }
 
@@ -102,7 +142,7 @@ export class PublicBlockchain {
     credentialHash: string,
     issuerDID: string,
     recipientDID: string,
-    zkProof: ZKProof
+    zkProof: ZKProof,
   ): Promise<Transaction> {
     const transaction: Transaction = {
       id: 'tx_' + Date.now() + '_' + Math.random().toString(36).substring(7),
@@ -115,19 +155,36 @@ export class PublicBlockchain {
         zkProof: {
           proofId: zkProof.proofId,
           statement: zkProof.statement,
-          commitmentHash: zkProof.commitmentHash
+          commitmentHash: zkProof.commitmentHash,
         },
         publicMetadata: {
           type: 'AcademicCredential',
-          status: 'active'
-        }
+          status: 'active',
+        },
       },
       signature: await sha256(credentialId + credentialHash + issuerDID),
       timestamp: new Date().toISOString(),
-      gasUsed: 21000 // Simulated gas
+      gasUsed: 21000, // Simulated gas
     };
 
     this.pendingTransactions.push(transaction);
+
+    // Persist to backend
+    try {
+      const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
+      await fetch(`${apiBase}/api/blockchain/transaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction }),
+      });
+    } catch (e) {
+      logPersistenceFallback(
+        'persist:/api/blockchain/transaction',
+        'Public transaction persistence unavailable; using in-memory chain state',
+        e,
+      );
+    }
+
     return transaction;
   }
 
@@ -145,7 +202,7 @@ export class PublicBlockchain {
 
     // Calculate Merkle root
     const txHashes = await Promise.all(
-      this.pendingTransactions.map(tx => sha256(JSON.stringify(tx)))
+      this.pendingTransactions.map((tx) => sha256(JSON.stringify(tx))),
     );
     const merkleRoot = await this.calculateMerkleRoot(txHashes);
 
@@ -157,13 +214,29 @@ export class PublicBlockchain {
       hash: '',
       nonce: 0,
       validator: validatorAddress,
-      merkleRoot
+      merkleRoot,
     };
 
     block.hash = await this.calculateBlockHash(block);
-    
+
     this.chain.push(block);
     this.pendingTransactions = [];
+
+    // Persist mined block to backend
+    try {
+      const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
+      await fetch(`${apiBase}/api/blockchain/block`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ validator: validatorAddress }),
+      });
+    } catch (e) {
+      logPersistenceFallback(
+        'persist:/api/blockchain/block',
+        'Mined block persistence unavailable; using in-memory chain state',
+        e,
+      );
+    }
 
     return block;
   }
@@ -191,9 +264,12 @@ export class PublicBlockchain {
    * Calculate block hash
    */
   private async calculateBlockHash(block: Block): Promise<string> {
-    const blockData = block.index + block.timestamp + 
-                      JSON.stringify(block.transactions) + 
-                      block.previousHash + block.nonce;
+    const blockData =
+      block.index +
+      block.timestamp +
+      JSON.stringify(block.transactions) +
+      block.previousHash +
+      block.nonce;
     return await sha256(blockData);
   }
 
@@ -225,7 +301,7 @@ export class PublicBlockchain {
    */
   getTransaction(txId: string): Transaction | null {
     for (const block of this.chain) {
-      const tx = block.transactions.find(t => t.id === txId);
+      const tx = block.transactions.find((t) => t.id === txId);
       if (tx) return tx;
     }
     return null;
@@ -236,13 +312,13 @@ export class PublicBlockchain {
    */
   getStats(): ChainStats {
     const totalTransactions = this.chain.reduce((sum, block) => sum + block.transactions.length, 0);
-    
+
     return {
       totalBlocks: this.chain.length,
       totalTransactions,
       averageBlockTime: 2.5, // seconds
       networkHashRate: '2.4 TH/s',
-      consensusMechanism: 'PoS'
+      consensusMechanism: 'PoS',
     };
   }
 
@@ -273,7 +349,7 @@ export class PrivateBlockchain {
       previousHash: '0',
       hash: '0000000000000000000000000000000000000000000000000000000000000000',
       nonce: 0,
-      merkleRoot: '0'
+      merkleRoot: '0',
     };
   }
 
@@ -284,17 +360,14 @@ export class PrivateBlockchain {
     credentialId: string,
     sensitiveData: Record<string, unknown>,
     issuerDID: string,
-    recipientDID: string
+    recipientDID: string,
   ): Promise<{ success: boolean; encryptionKey?: string }> {
     try {
       // Generate encryption key
       const encryptionKey = await generateAESKey();
-      
+
       // Encrypt sensitive data
-      const encryptedData = await encryptData(
-        JSON.stringify(sensitiveData),
-        encryptionKey
-      );
+      const encryptedData = await encryptData(JSON.stringify(sensitiveData), encryptionKey);
 
       // Store encrypted credential
       this.encryptedCredentials.set(credentialId, {
@@ -302,7 +375,7 @@ export class PrivateBlockchain {
         iv: encryptedData.iv,
         issuer: issuerDID,
         recipient: recipientDID,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
 
       // Set access control
@@ -311,7 +384,32 @@ export class PrivateBlockchain {
       // Export key for storage (in production, use key management service)
       const exportedKey = await crypto.subtle.exportKey('raw', encryptionKey);
       const keyArray = Array.from(new Uint8Array(exportedKey));
-      const keyHex = keyArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      const keyHex = keyArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+      // Persist to backend
+      try {
+        const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
+        await fetch(`${apiBase}/api/blockchain/private/store`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            credentialId,
+            encryptedData: {
+              ciphertext: encryptedData.ciphertext,
+              iv: encryptedData.iv,
+              issuer: issuerDID,
+              recipient: recipientDID,
+              timestamp: new Date().toISOString(),
+            },
+          }),
+        });
+      } catch (e) {
+        logPersistenceFallback(
+          'persist:/api/blockchain/private/store',
+          'Private chain persistence unavailable; using in-memory encrypted state',
+          e,
+        );
+      }
 
       return { success: true, encryptionKey: keyHex };
     } catch (error) {
@@ -328,7 +426,7 @@ export class PrivateBlockchain {
     if (!acl || !acl.has(granterDID)) {
       return false; // Granter must have access
     }
-    
+
     acl.add(did);
     return true;
   }
@@ -341,7 +439,7 @@ export class PrivateBlockchain {
     if (!acl || !acl.has(revokerDID)) {
       return false; // Revoker must have access
     }
-    
+
     acl.delete(did);
     return true;
   }
@@ -357,11 +455,14 @@ export class PrivateBlockchain {
   /**
    * Get encrypted credential (if authorized)
    */
-  getEncryptedCredential(credentialId: string, requesterDID: string): Record<string, unknown> | null {
+  getEncryptedCredential(
+    credentialId: string,
+    requesterDID: string,
+  ): Record<string, unknown> | null {
     if (!this.hasAccess(credentialId, requesterDID)) {
       return null;
     }
-    
+
     return this.encryptedCredentials.get(credentialId) || null;
   }
 
@@ -372,7 +473,7 @@ export class PrivateBlockchain {
     return {
       totalCredentials: this.encryptedCredentials.size,
       totalBlocks: this.chain.length,
-      storageUsed: JSON.stringify(Array.from(this.encryptedCredentials.values())).length
+      storageUsed: JSON.stringify(Array.from(this.encryptedCredentials.values())).length,
     };
   }
 }
@@ -386,7 +487,7 @@ export class BlockchainManager {
   constructor() {
     this.publicChain = new PublicBlockchain();
     this.privateChain = new PrivateBlockchain();
-    
+
     // Initialize with default validators
     this.publicChain.addValidator('0xGovernance001');
     this.publicChain.addValidator('0xUniversity001');
@@ -400,79 +501,83 @@ export class BlockchainManager {
     issuerDID: string,
     recipientDID: string,
     studentEmail?: string,
-    studentName?: string
+    studentName?: string,
   ): Promise<{ publicTx: Transaction; privateKey: string; serialNumber: string; qrCode: string }> {
-    return await performanceMonitor.measureOperation('credential_issuance', async () => {
-      // 1. Calculate credential hash
-      const credentialHash = await sha256(JSON.stringify(credential));
+    return await performanceMonitor.measureOperation(
+      'credential_issuance',
+      async () => {
+        // 1. Calculate credential hash
+        const credentialHash = await sha256(JSON.stringify(credential));
 
-      // 2. Generate serial number
-      const serial = serialNumberService.registerSerial(credential.id, issuerDID);
+        // 2. Generate serial number
+        const serial = serialNumberService.registerSerial(credential.id, issuerDID);
 
-      // 3. Generate ZK Proof
-      const zkProof = await generateZKProof({
-        credentialId: credential.id,
-        claimsToProve: ['is_valid_credential', 'issued_by_accredited_institution'],
-        privateData: credential.hiddenData || {},
-        publicData: credential.data
-      });
+        // 3. Generate ZK Proof
+        const zkProof = await generateZKProof({
+          credentialId: credential.id,
+          claimsToProve: ['is_valid_credential', 'issued_by_accredited_institution'],
+          privateData: credential.hiddenData || {},
+          publicData: credential.data,
+        });
 
-      // 4. Store on public chain (hash + proof)
-      const publicTx = await this.publicChain.createCredentialTransaction(
-        credential.id,
-        credentialHash,
-        issuerDID,
-        recipientDID,
-        zkProof
-      );
-
-      // 5. Store encrypted data on private chain
-      const privateResult = await this.privateChain.storeCredential(
-        credential.id,
-        {
-          ...credential,
-          fullData: { ...credential.data, ...credential.hiddenData }
-        },
-        issuerDID,
-        recipientDID
-      );
-
-      // 6. Generate QR code
-      const qrData: QRCodeData = {
-        credentialId: credential.id,
-        issuer: issuerDID,
-        subject: recipientDID,
-        issuanceDate: new Date().toISOString(),
-        verificationUrl: qrCodeService.generateVerificationUrl(credential.id)
-      };
-      const qrCode = await qrCodeService.generateQRCode(qrData);
-
-      // 7. Send email notification
-      if (studentEmail && studentName) {
-        await emailService.sendCredentialIssuedEmail(
-          studentEmail,
-          studentName,
+        // 4. Store on public chain (hash + proof)
+        const publicTx = await this.publicChain.createCredentialTransaction(
           credential.id,
-          serial.serialNumber,
-          qrCode
+          credentialHash,
+          issuerDID,
+          recipientDID,
+          zkProof,
         );
-      }
 
-      // 8. Mine block on public chain
-      await this.publicChain.minePendingTransactions('0xGovernance001');
+        // 5. Store encrypted data on private chain
+        const privateResult = await this.privateChain.storeCredential(
+          credential.id,
+          {
+            ...credential,
+            fullData: { ...credential.data, ...credential.hiddenData },
+          },
+          issuerDID,
+          recipientDID,
+        );
 
-      logger.info('Credential issued with serial number and QR code', {
-        credentialId: credential.id,
-        serialNumber: serial.serialNumber
-      });
+        // 6. Generate QR code
+        const qrData: QRCodeData = {
+          credentialId: credential.id,
+          issuer: issuerDID,
+          subject: recipientDID,
+          issuanceDate: new Date().toISOString(),
+          verificationUrl: qrCodeService.generateVerificationUrl(credential.id),
+        };
+        const qrCode = await qrCodeService.generateQRCode(qrData);
 
-      return {
-        publicTx,
-        privateKey: privateResult.encryptionKey || '',
-        serialNumber: serial.serialNumber,
-        qrCode
-      };
-    }, 50000); // 50k gas for issuance
+        // 7. Send email notification
+        if (studentEmail && studentName) {
+          await emailService.sendCredentialIssuedEmail(
+            studentEmail,
+            studentName,
+            credential.id,
+            serial.serialNumber,
+            qrCode,
+          );
+        }
+
+        // 8. Mine block on public chain
+        await this.publicChain.minePendingTransactions('0xGovernance001');
+
+        logger.info('Credential issued with serial number and QR code', {
+          credentialId: credential.id,
+          serialNumber: serial.serialNumber,
+        });
+
+        return {
+          publicTx,
+          privateKey: privateResult.encryptionKey || '',
+          serialNumber: serial.serialNumber,
+          qrCode,
+        };
+      },
+      50000,
+    ); // 50k gas for issuance
   }
 
   /**
@@ -485,8 +590,8 @@ export class BlockchainManager {
       combined: {
         totalStorage: 'Optimized Dual-Chain Architecture',
         securityLevel: 'Enterprise-Grade with ZKP',
-        complianceStatus: 'GDPR Compliant'
-      }
+        complianceStatus: 'GDPR Compliant',
+      },
     };
   }
 }

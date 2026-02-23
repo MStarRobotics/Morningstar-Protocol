@@ -3,7 +3,7 @@ import { FileSearch, Activity, CheckCircle, ShieldCheck, FileText, Building, Use
 import { Card, Button, GlitchText } from '../components/UI';
 import { analyzeVerificationTrust } from '../services/geminiService';
 import { jsPDF } from "jspdf";
-import { verifyCredentialPayload, VerifiableCredential, VerificationResult } from '../services/verificationPipeline';
+import { verifyCredentialFull, VerifiableCredential, VerificationResult } from '../services/verificationPipeline';
 
 const VerifierPortal: React.FC = () => {
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'analyzing' | 'valid' | 'invalid'>('idle');
@@ -46,7 +46,7 @@ const VerifierPortal: React.FC = () => {
     }
 
     try {
-         const result = await verifyCredentialPayload(payload);
+         const result = await verifyCredentialFull(payload);
          setVerificationResult(result);
 
          const subjectName = String(payload.credentialSubject?.name || '');

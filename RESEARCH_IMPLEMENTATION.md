@@ -16,11 +16,13 @@ This document details all features implemented from the 4 research papers analyz
 ## Implemented Features
 
 ### 1. QR Code Generation & Verification System
+
 **Source:** All papers (Hyperledger, IJCRT, BACIP)
 
 **Implementation:** `src/services/qrCodeService.ts`
 
 **Features:**
+
 - Generate QR codes for credentials with embedded verification data
 - Parse QR code data for verification
 - Generate verification URLs
@@ -28,6 +30,7 @@ This document details all features implemented from the 4 research papers analyz
 - 300x300 pixel resolution
 
 **Usage:**
+
 ```typescript
 import { qrCodeService } from './services/qrCodeService';
 
@@ -36,7 +39,7 @@ const qrData = {
   issuer: 'did:pistis:university',
   subject: 'did:pistis:student',
   issuanceDate: new Date().toISOString(),
-  verificationUrl: qrCodeService.generateVerificationUrl('cred-123')
+  verificationUrl: qrCodeService.generateVerificationUrl('cred-123'),
 };
 
 const qrCode = await qrCodeService.generateQRCode(qrData);
@@ -44,6 +47,7 @@ const qrCode = await qrCodeService.generateQRCode(qrData);
 ```
 
 **Research Justification:**
+
 - Hyperledger paper: "Students can generate a QR code and share the serial number with the employer"
 - IJCRT paper: "QRCode should be scanned with a smartphone" for instant verification
 - Enables mobile-first verification workflow
@@ -51,11 +55,13 @@ const qrCode = await qrCodeService.generateQRCode(qrData);
 ---
 
 ### 2. Certificate Serial Number System
+
 **Source:** Hyperledger Fabric paper, IJCRT paper
 
 **Implementation:** `src/services/serialNumberService.ts`
 
 **Features:**
+
 - Unique serial number generation per credential
 - Issuer-specific prefixes using SHA-256 hash
 - Timestamp-based uniqueness
@@ -66,6 +72,7 @@ const qrCode = await qrCodeService.generateQRCode(qrData);
 Example: `90F1E6-MLDSVOYL-T94QSW`
 
 **Usage:**
+
 ```typescript
 import { serialNumberService } from './services/serialNumberService';
 
@@ -78,24 +85,29 @@ const isValid = serialNumberService.validateChecksum(serial);
 ```
 
 **Research Justification:**
+
 - Hyperledger paper: "Employer can access the portal to validate a certificate using the certificate serial number"
 - IJCRT paper: "Certificate Id will be generated and the same will be sent to the respective student email"
 
 ---
 
 ### 3. Email Notification Service
+
 **Source:** IJCRT paper, Hyperledger paper
 
 **Implementation:** `src/services/emailService.ts`
 
 **Features:**
+
 - Automated credential issuance notifications
 - Verification request emails to employers
 - Includes credential ID, serial number, and QR code
 - Email queue management
-- Production-ready integration points for SendGrid/AWS SES
+- **Backend API Integration**: Routes emails through `/api/email/notify`
+- Implementation of SendGrid/AWS SES via backend
 
 **Usage:**
+
 ```typescript
 import { emailService } from './services/emailService';
 
@@ -104,29 +116,32 @@ await emailService.sendCredentialIssuedEmail(
   'John Doe',
   'cred-123',
   'SERIAL-123',
-  qrCodeDataUrl
+  qrCodeDataUrl,
 );
 
 await emailService.sendVerificationRequestEmail(
   'hr@company.com',
   'HR Manager',
   'John Doe',
-  'cred-123'
+  'cred-123',
 );
 ```
 
 **Research Justification:**
+
 - IJCRT paper: "Students will receive mail from the university which contains Certificate Id"
 - Automates credential distribution workflow
 
 ---
 
 ### 4. Merkle Tree Batch Verification
+
 **Source:** BACIP paper, Hyperledger paper
 
 **Implementation:** `src/services/merkleTreeService.ts`
 
 **Features:**
+
 - Build Merkle trees from credential batches
 - Generate cryptographic proofs for individual credentials
 - Verify proofs against Merkle root
@@ -134,6 +149,7 @@ await emailService.sendVerificationRequestEmail(
 - SHA-256 hashing for security
 
 **Usage:**
+
 ```typescript
 import { merkleTreeService } from './services/merkleTreeService';
 
@@ -151,6 +167,7 @@ const isValid = merkleTreeService.verifyProof(proof);
 ```
 
 **Research Justification:**
+
 - BACIP paper: "Merkle root returns at Target Hash... UniCert Signature is a trust guarantee"
 - Hyperledger paper: Mentions Merkle trees for transaction verification
 - Enables efficient batch credential verification
@@ -158,11 +175,13 @@ const isValid = merkleTreeService.verifyProof(proof);
 ---
 
 ### 5. JWT Authentication System
+
 **Source:** BACIP paper
 
 **Implementation:** `src/services/jwtAuthService.ts`
 
 **Features:**
+
 - Stateless authentication using JSON Web Tokens
 - Role-based access control (admin, issuer, verifier, student)
 - Permission-based authorization
@@ -171,6 +190,7 @@ const isValid = merkleTreeService.verifyProof(proof);
 - 24-hour default expiration
 
 **Usage:**
+
 ```typescript
 import { jwtAuthService } from './services/jwtAuthService';
 
@@ -178,7 +198,7 @@ import { jwtAuthService } from './services/jwtAuthService';
 const token = jwtAuthService.generateToken({
   sub: 'user-123',
   role: 'issuer',
-  permissions: ['issue:credentials', 'revoke:credentials']
+  permissions: ['issue:credentials', 'revoke:credentials'],
 });
 
 // Verify token
@@ -193,6 +213,7 @@ const newToken = jwtAuthService.refreshToken(token);
 ```
 
 **Research Justification:**
+
 - BACIP paper: "BACIP utilizes JSON Web Tokens (JWT) to manage authentication"
 - "JWTs offer an efficient and secure way to assert claims between two parties"
 - Ideal for distributed blockchain systems
@@ -200,11 +221,13 @@ const newToken = jwtAuthService.refreshToken(token);
 ---
 
 ### 6. Performance Monitoring System
+
 **Source:** Hyperledger Fabric paper
 
 **Implementation:** `src/services/performanceMonitor.ts`
 
 **Features:**
+
 - Real-time performance metrics collection
 - Operation timing and success rate tracking
 - Throughput measurement (transactions per hour)
@@ -213,6 +236,7 @@ const newToken = jwtAuthService.refreshToken(token);
 - Metrics export for analysis
 
 **Metrics Tracked:**
+
 - Total credentials issued
 - Total verifications performed
 - Average issuance time
@@ -223,6 +247,7 @@ const newToken = jwtAuthService.refreshToken(token);
 - Active users
 
 **Usage:**
+
 ```typescript
 import { performanceMonitor } from './services/performanceMonitor';
 
@@ -232,7 +257,7 @@ const result = await performanceMonitor.measureOperation(
   async () => {
     return await issueCredential(data);
   },
-  50000 // gas used
+  50000, // gas used
 );
 
 // Get system metrics
@@ -245,6 +270,7 @@ const report = performanceMonitor.exportMetrics();
 ```
 
 **Research Justification:**
+
 - Hyperledger paper: "Performance measurement of a blockchain network is as crucial as its security"
 - "Utilized the Hyperledger Caliper tool" for performance testing
 - Enables continuous monitoring and optimization
@@ -252,11 +278,13 @@ const report = performanceMonitor.exportMetrics();
 ---
 
 ### 7. Channel Service (Multi-Organization Communication)
+
 **Source:** Hyperledger Fabric paper
 
 **Implementation:** `src/services/channelService.ts`
 
 **Features:**
+
 - Private communication channels between organizations
 - Multi-organization support (universities, employers, ministry)
 - Channel-specific transaction isolation
@@ -264,6 +292,7 @@ const report = performanceMonitor.exportMetrics();
 - Transaction history per channel
 
 **Usage:**
+
 ```typescript
 import { channelService } from './services/channelService';
 
@@ -271,14 +300,14 @@ import { channelService } from './services/channelService';
 const channel = channelService.createChannel(
   'university-employer-channel',
   ['university-1', 'employer-1'],
-  true // private
+  true, // private
 );
 
 // Add transaction to channel
 const tx = channelService.addTransaction(
   channel.id,
   { credentialId: 'cred-123', action: 'verify' },
-  ['university-1', 'employer-1']
+  ['university-1', 'employer-1'],
 );
 
 // Get channel transactions
@@ -286,6 +315,7 @@ const transactions = channelService.getChannelTransactions(channel.id);
 ```
 
 **Research Justification:**
+
 - Hyperledger paper: "Channels - Private communication channels between organizations"
 - "Hyperledger Fabric provides essential tools... supports widely used languages"
 - Enables permissioned blockchain architecture
@@ -314,15 +344,16 @@ async issueCredential(
 ```
 
 **New workflow:**
+
 1. Calculate credential hash
 2. **Generate serial number** (NEW)
 3. Generate ZK proof
-4. Store on public chain
-5. Store encrypted data on private chain
+4. **Persist to Backend Public Chain** (NEW)
+5. **Persist to Backend Private Chain** (NEW)
 6. **Generate QR code** (NEW)
-7. **Send email notification** (NEW)
+7. **Send email notification via Backend** (NEW)
 8. **Record performance metrics** (NEW)
-9. Mine block
+9. Mine block (persisted to backend)
 
 ---
 
@@ -333,11 +364,13 @@ All features have comprehensive test coverage:
 **Test File:** `tests/researchFeatures.test.ts`
 
 **Test Results:**
+
 - ✅ 18 tests for new features
 - ✅ 323 total tests passing
 - ✅ 100% success rate
 
 **Test Coverage:**
+
 - QR Code generation and parsing
 - Serial number generation and verification
 - Email notification sending
@@ -351,36 +384,40 @@ All features have comprehensive test coverage:
 
 Based on research paper specifications:
 
-| Feature | Performance | Research Target |
-|---------|-------------|-----------------|
-| Credential Issuance | 2.5s | 5-10s (BACIP) |
-| QR Code Generation | <50ms | N/A |
-| Serial Number Gen | <1ms | N/A |
-| Merkle Proof Verify | <5ms | N/A |
-| JWT Token Gen | <3ms | N/A |
-| Email Queue | <2ms | N/A |
+| Feature             | Performance | Research Target |
+| ------------------- | ----------- | --------------- |
+| Credential Issuance | 2.5s        | 5-10s (BACIP)   |
+| QR Code Generation  | <50ms       | N/A             |
+| Serial Number Gen   | <1ms        | N/A             |
+| Merkle Proof Verify | <5ms        | N/A             |
+| JWT Token Gen       | <3ms        | N/A             |
+| Email Queue         | <2ms        | N/A             |
 
 ---
 
 ## Security Considerations
 
 ### QR Code Security
+
 - High error correction prevents tampering
 - Embedded verification URL for authenticity
 - Data integrity through JSON structure
 
 ### Serial Number Security
+
 - Cryptographic checksum validation
 - Issuer-specific prefixes prevent collision
 - Timestamp-based uniqueness
 
 ### JWT Security
+
 - HS256 signing algorithm
 - 24-hour token expiration
 - Secure secret key management
 - Permission-based access control
 
 ### Merkle Tree Security
+
 - SHA-256 cryptographic hashing
 - Tamper-evident proof structure
 - Efficient verification without revealing full dataset
@@ -427,10 +464,10 @@ interface QRCodeData {
 }
 
 class QRCodeService {
-  generateQRCode(data: QRCodeData): Promise<string>
-  generateQRCodeBuffer(data: QRCodeData): Promise<Buffer>
-  parseQRCodeData(qrData: string): QRCodeData
-  generateVerificationUrl(credentialId: string): string
+  generateQRCode(data: QRCodeData): Promise<string>;
+  generateQRCodeBuffer(data: QRCodeData): Promise<Buffer>;
+  parseQRCodeData(qrData: string): QRCodeData;
+  generateVerificationUrl(credentialId: string): string;
 }
 ```
 
@@ -446,10 +483,10 @@ interface CertificateSerial {
 }
 
 class SerialNumberService {
-  generateSerialNumber(credentialId: string, issuer: string): string
-  registerSerial(credentialId: string, issuer: string): CertificateSerial
-  verifySerial(serialNumber: string): CertificateSerial | null
-  validateChecksum(serial: CertificateSerial): boolean
+  generateSerialNumber(credentialId: string, issuer: string): string;
+  registerSerial(credentialId: string, issuer: string): CertificateSerial;
+  verifySerial(serialNumber: string): CertificateSerial | null;
+  validateChecksum(serial: CertificateSerial): boolean;
 }
 ```
 
@@ -471,18 +508,18 @@ class EmailService {
     studentName: string,
     credentialId: string,
     serialNumber: string,
-    qrCodeDataUrl: string
-  ): Promise<void>
-  
+    qrCodeDataUrl: string,
+  ): Promise<void>;
+
   sendVerificationRequestEmail(
     employerEmail: string,
     employerName: string,
     studentName: string,
-    credentialId: string
-  ): Promise<void>
-  
-  getEmailQueue(): EmailNotification[]
-  clearQueue(): void
+    credentialId: string,
+  ): Promise<void>;
+
+  getEmailQueue(): EmailNotification[];
+  clearQueue(): void;
 }
 ```
 
@@ -502,10 +539,10 @@ interface MerkleProof {
 }
 
 class MerkleTreeService {
-  buildTree(credentials: string[]): MerkleNode
-  generateProof(credentials: string[], targetCredential: string): MerkleProof
-  verifyProof(proof: MerkleProof): boolean
-  getMerkleRoot(credentials: string[]): string
+  buildTree(credentials: string[]): MerkleNode;
+  generateProof(credentials: string[], targetCredential: string): MerkleProof;
+  verifyProof(proof: MerkleProof): boolean;
+  getMerkleRoot(credentials: string[]): string;
 }
 ```
 
@@ -522,11 +559,11 @@ interface JWTPayload {
 }
 
 class JWTAuthService {
-  generateToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'iss'>, options?: JWTOptions): string
-  verifyToken(token: string): JWTPayload
-  hasPermission(token: string, requiredPermission: string): boolean
-  hasRole(token: string, requiredRole: JWTPayload['role']): boolean
-  refreshToken(token: string): string
+  generateToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'iss'>, options?: JWTOptions): string;
+  verifyToken(token: string): JWTPayload;
+  hasPermission(token: string, requiredPermission: string): boolean;
+  hasRole(token: string, requiredRole: JWTPayload['role']): boolean;
+  refreshToken(token: string): string;
 }
 ```
 
@@ -553,14 +590,14 @@ interface SystemMetrics {
 }
 
 class PerformanceMonitoringService {
-  recordMetric(operation: string, duration: number, success: boolean, gasUsed?: number): void
-  measureOperation<T>(operation: string, fn: () => Promise<T>, gasUsed?: number): Promise<T>
-  getSystemMetrics(): SystemMetrics
-  getMetricsByOperation(operation: string): PerformanceMetrics[]
-  getRecentMetrics(limit?: number): PerformanceMetrics[]
-  getThroughputStats(): { operation: string; tps: number }[]
-  exportMetrics(): string
-  clearMetrics(): void
+  recordMetric(operation: string, duration: number, success: boolean, gasUsed?: number): void;
+  measureOperation<T>(operation: string, fn: () => Promise<T>, gasUsed?: number): Promise<T>;
+  getSystemMetrics(): SystemMetrics;
+  getMetricsByOperation(operation: string): PerformanceMetrics[];
+  getRecentMetrics(limit?: number): PerformanceMetrics[];
+  getThroughputStats(): { operation: string; tps: number }[];
+  exportMetrics(): string;
+  clearMetrics(): void;
 }
 ```
 
@@ -569,24 +606,28 @@ class PerformanceMonitoringService {
 ## Compliance with Research Standards
 
 ### W3C Standards (BACIP)
+
 ✅ Verifiable Credentials
 ✅ Decentralized Identifiers (DIDs)
 ✅ JSON-LD context
 ✅ StatusList2021 for revocation
 
 ### Hyperledger Fabric Standards
+
 ✅ Permissioned blockchain architecture
 ✅ Channel-based communication
 ✅ Chaincode (smart contracts)
 ✅ Performance monitoring
 
 ### Security Standards (All Papers)
+
 ✅ SHA-256 hashing
 ✅ ECDSA signatures
 ✅ AES-256-GCM encryption
 ✅ Zero-Knowledge Proofs
 
 ### Privacy Standards (BACIP, GDPR)
+
 ✅ Data minimization
 ✅ Consent management
 ✅ Right to erasure

@@ -13,10 +13,6 @@ import { credentialSchemaRegistry } from './credentialSchema';
 import { governanceRegistry } from './governanceRegistry';
 import { StatusListService } from './statusList';
 import { ipfsServiceClient } from './ipfsService';
-import {
-  verifyCredential as verifyW3CProof,
-  type W3CCredential,
-} from './w3cCredentialService';
 import { verifyW3CCredential } from './vc/verifierService';
 import type { W3CVerifiableCredential } from './vc/types';
 import { getErrorMessage } from './errorUtils';
@@ -89,6 +85,20 @@ const resolveStatusListCredential = async (
 
   return null;
 };
+
+function toW3CCredential(payload: VerifiableCredential): W3CVerifiableCredential {
+  return {
+    '@context': payload['@context'],
+    type: payload.type,
+    issuer: payload.issuer,
+    validFrom: payload.issuanceDate || new Date().toISOString(),
+    issuanceDate: payload.issuanceDate,
+    credentialSubject: payload.credentialSubject,
+    credentialSchema: payload.credentialSchema,
+    credentialStatus: payload.credentialStatus,
+    proof: payload.proof as unknown as W3CVerifiableCredential['proof'],
+  };
+}
 
 export const verifyCredentialPayload = async (payload: VerifiableCredential): Promise<VerificationResult> => {
   const checks: VerificationCheck[] = [];
@@ -205,36 +215,17 @@ export const verifyCredentialPayload = async (payload: VerifiableCredential): Pr
 export const verifyCredentialFull = async (
   payload: VerifiableCredential
 ): Promise<VerificationResult> => {
-  // Run structural checks first
-  const result = await verifyCredentialPayload(payload);
-
-  // If a proof object is present, attempt W3C VC library verification
-  if (payload.proof && Object.keys(payload.proof).length > 0) {
-    try {
-      const w3cResult = await verifyW3CProof(payload as unknown as W3CCredential);
-
-      // Replace the simple "proof present" check with the real result
-      const proofIdx = result.checks.findIndex((c) => c.name === 'proof');
-      if (proofIdx !== -1) {
-        result.checks[proofIdx] = {
-          name: 'proof',
-          status: w3cResult.verified ? 'pass' : 'fail',
-          detail: w3cResult.verified
-            ? 'Ed25519Signature2020 proof verified'
-            : 'Proof verification failed',
-        };
-
-        if (!w3cResult.verified) {
-          result.issues.push('Cryptographic proof verification failed');
-          result.valid = false;
-        }
-      }
-    } catch {
-      // If the W3C library throws, keep the existing structural check
-    }
+  try {
+    // Full verification (structural + cryptographic + trust + schema)
+    return await verifyW3CCredentialFull(toW3CCredential(payload));
+  } catch (error) {
+    const fallback = await verifyCredentialPayload(payload);
+    const msg = getErrorMessage(error) || 'W3C verification failed';
+    fallback.valid = false;
+    fallback.issues.push(msg);
+    fallback.checks.push({ name: 'w3c-verifier', status: 'fail', detail: msg });
+    return fallback;
   }
-
-  return result;
 };
 
 /**

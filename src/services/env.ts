@@ -27,6 +27,7 @@ export const env = {
 
   // API Keys (dev-only; production uses backend proxy)
   geminiApiKey: str('VITE_GEMINI_API_KEY'),
+  reownProjectId: str('VITE_REOWN_PROJECT_ID', 'b56e18d47c72ab683b10814fe9495694'), // Default to a placeholder if missing
   ipfsApiKey: str('VITE_IPFS_API_KEY'),
   ipfsPinningJwt: str('VITE_IPFS_PINNING_JWT'),
   ipfsWriteMode: str('VITE_IPFS_WRITE_MODE', 'none'),

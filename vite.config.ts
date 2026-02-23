@@ -61,6 +61,11 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       include: [
         '@noble/ed25519',
+        '@digitalcredentials/vc',
+        '@digitalcredentials/ed25519-signature-2020',
+        '@digitalcredentials/jsonld',
+        '@digitalcredentials/jsonld-signatures',
+        '@digitalbazaar/ed25519-verification-key-2020',
         'buffer',
       ],
       esbuildOptions: {

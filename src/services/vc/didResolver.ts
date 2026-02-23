@@ -75,7 +75,7 @@ async function resolvePolygonDID(did: string): Promise<DIDResolutionResult> {
 
   if (!didDocument) {
     // Check if we have metadata (DID exists but doc is missing)
-    const metadata = getDIDMetadata(did);
+    const metadata = await getDIDMetadata(did);
 
     if (metadata) {
       return {
@@ -258,7 +258,7 @@ export function createDIDResolver() {
  * Used for resolving `proof.verificationMethod` references.
  */
 export async function resolveVerificationMethod(
-  verificationMethodId: string
+  verificationMethodId: string,
 ): Promise<{ id: string; type: string; controller: string; publicKeyMultibase?: string } | null> {
   // Extract the DID from the verification method ID (e.g., "did:polygon:0x123#key-1" -> "did:polygon:0x123")
   const did = verificationMethodId.split('#')[0];
@@ -269,9 +269,7 @@ export async function resolveVerificationMethod(
     return null;
   }
 
-  const method = result.didDocument.verificationMethod.find(
-    (vm) => vm.id === verificationMethodId
-  );
+  const method = result.didDocument.verificationMethod.find((vm) => vm.id === verificationMethodId);
 
   return method || null;
 }

@@ -1,0 +1,9 @@
+/* Root stylesheet stub to satisfy Vite build-time reference. */
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+}

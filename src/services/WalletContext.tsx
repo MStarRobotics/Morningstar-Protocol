@@ -6,17 +6,15 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { detectWallets, formatAddress, isMockMode, type DetectedWallet } from './walletService';
 import {
-  detectWallets,
-  connectWallet as rawConnect,
-  getChainId,
-  switchToPolygonAmoy,
-  signMessage as rawSign,
-  formatAddress,
-  isMockMode,
-  POLYGON_AMOY,
-  type DetectedWallet,
-} from './walletService';
+  useAppKit,
+  useAppKitAccount,
+  useAppKitNetwork,
+  useWalletInfo,
+  useDisconnect,
+} from '@reown/appkit/react';
+import { polygonAmoy } from '@reown/appkit/networks';
 import { env } from './env';
 import { logger } from './logger';
 
@@ -58,156 +56,101 @@ const WalletContext = createContext<WalletState | null>(null);
 // ---------------------------------------------------------------------------
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Reown AppKit Hooks
+  const { open, close } = useAppKit();
+  const { address: appKitAddress, isConnected, status } = useAppKitAccount();
+  const { chainId: appKitChainId } = useAppKitNetwork();
+  const { walletInfo } = useWalletInfo();
+
+  // Local state to maintain compatibility with existing context interface
   const [wallets, setWallets] = useState<DetectedWallet[]>([]);
-  const [address, setAddress] = useState<string | null>(null);
-  const [chainId, setChainId] = useState<number | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const activeProviderRef = useRef<EthereumProvider | null>(null);
   const mockMode = isMockMode();
 
-  // Detect wallets on mount
+  // Sync AppKit state to local state
+  const isConnecting = status === 'connecting' || status === 'reconnecting';
+  const address = isConnected && appKitAddress ? appKitAddress : null;
+  const chainId = isConnected && appKitChainId ? Number(appKitChainId) : null;
+
+  // Detect wallets on mount (keep existing detection for "Browser Wallet" listing if needed,
+  // though AppKit handles the main connection)
   useEffect(() => {
     const detected = detectWallets();
     setWallets(detected);
-    logger.info(`[Wallet] Detected ${detected.length} wallet(s): ${detected.map(w => w.name).join(', ') || 'none'}`);
   }, []);
-
-  // Event handlers (stable refs)
-  const handleAccountsChanged = useCallback((accounts: string[]) => {
-    if (accounts.length === 0) {
-      setAddress(null);
-      activeProviderRef.current = null;
-      logger.info('[Wallet] Disconnected (accounts empty)');
-    } else {
-      setAddress(accounts[0]);
-      logger.info(`[Wallet] Account changed: ${formatAddress(accounts[0])}`);
-    }
-  }, []);
-
-  const handleChainChanged = useCallback((chainIdHex: string) => {
-    const newChainId = parseInt(chainIdHex, 16);
-    setChainId(newChainId);
-    logger.info(`[Wallet] Chain changed: ${newChainId}`);
-  }, []);
-
-  const handleDisconnect = useCallback(() => {
-    setAddress(null);
-    setChainId(null);
-    activeProviderRef.current = null;
-    logger.info('[Wallet] Provider disconnected');
-  }, []);
-
-  // Subscribe / unsubscribe to wallet events
-  useEffect(() => {
-    const provider = activeProviderRef.current;
-    if (!provider || mockMode) return;
-
-    provider.on('accountsChanged', handleAccountsChanged);
-    provider.on('chainChanged', handleChainChanged);
-    provider.on('disconnect', handleDisconnect);
-
-    return () => {
-      provider.removeListener('accountsChanged', handleAccountsChanged);
-      provider.removeListener('chainChanged', handleChainChanged);
-      provider.removeListener('disconnect', handleDisconnect);
-    };
-  }, [address, mockMode, handleAccountsChanged, handleChainChanged, handleDisconnect]);
 
   // Connection
-  const connect = useCallback(async (walletName?: string): Promise<string | null> => {
-    setError(null);
+  const connect = useCallback(
+    async (walletName?: string): Promise<string | null> => {
+      setError(null);
 
-    // Mock mode
+      // Mock mode
+      if (mockMode) {
+        // ... keep mock logic ...
+        const mockAddr = '0x71C7656EC7ab88b098defB751B7401B5f6d8976F';
+        logger.info('[Wallet] Mock mode — connected with demo address');
+        return mockAddr;
+      }
+
+      try {
+        // Trigger Reown Modal
+        await open();
+
+        // We can't easily return the address immediately here because open()
+        // is void and connection is async via events.
+        // The calling code should rely on the `address` state, not this return value.
+        return null;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Wallet connection failed';
+        setError(message);
+        logger.error('[Wallet] Connection error:', err);
+        return null;
+      }
+    },
+    [mockMode, open],
+  );
+
+  const disconnect = useCallback(async () => {
     if (mockMode) {
-      const mockAddr = '0x71C7656EC7ab88b098defB751B7401B5f6d8976F';
-      setAddress(mockAddr);
-      setChainId(env.chainId);
-      logger.info('[Wallet] Mock mode — connected with demo address');
-      return mockAddr;
+      // reset local mock state if any
+      return;
     }
-
-    setIsConnecting(true);
     try {
-      // Find the requested wallet, or use the first detected
-      let wallet: DetectedWallet | undefined;
-      if (walletName) {
-        wallet = wallets.find(w => w.name === walletName);
-      }
-      if (!wallet && wallets.length > 0) {
-        wallet = wallets[0];
-      }
-      if (!wallet) {
-        throw new Error('No wallet detected. Please install MetaMask or another Web3 wallet.');
-      }
-
-      activeProviderRef.current = wallet.provider;
-      const addr = await rawConnect(wallet.provider);
-      setAddress(addr);
-
-      // Read chain ID
-      const currentChainId = await getChainId(wallet.provider);
-      setChainId(currentChainId);
-
-      // Auto-switch to correct network if needed
-      if (currentChainId !== env.chainId) {
-        try {
-          await switchToPolygonAmoy(wallet.provider);
-          const updatedChainId = await getChainId(wallet.provider);
-          setChainId(updatedChainId);
-        } catch (switchErr) {
-          logger.warn('[Wallet] Network switch declined or failed', switchErr);
-          // Don't fail the connection — just warn about wrong network
-        }
-      }
-
-      logger.info(`[Wallet] Connected: ${formatAddress(addr)} via ${wallet.name}`);
-      return addr;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Wallet connection failed';
-      setError(message);
-      logger.error('[Wallet] Connection error:', err);
-      return null;
-    } finally {
-      setIsConnecting(false);
+      await useDisconnect().disconnect();
+    } catch (e) {
+      logger.warn('Disconnect failed', e);
     }
-  }, [wallets, mockMode]);
-
-  const disconnect = useCallback(() => {
-    const provider = activeProviderRef.current;
-    if (provider) {
-      provider.removeListener('accountsChanged', handleAccountsChanged);
-      provider.removeListener('chainChanged', handleChainChanged);
-      provider.removeListener('disconnect', handleDisconnect);
-    }
-    activeProviderRef.current = null;
-    setAddress(null);
-    setChainId(null);
-    setError(null);
-    logger.info('[Wallet] Disconnected');
-  }, [handleAccountsChanged, handleChainChanged, handleDisconnect]);
+  }, [mockMode]);
 
   const switchNetwork = useCallback(async () => {
-    const provider = activeProviderRef.current;
-    if (!provider || mockMode) return;
+    if (mockMode) return;
     try {
-      await switchToPolygonAmoy(provider);
-      const newChainId = await getChainId(provider);
-      setChainId(newChainId);
+      await useAppKitNetwork().switchNetwork(polygonAmoy);
     } catch (err) {
       logger.error('[Wallet] Network switch failed:', err);
       setError('Failed to switch network');
     }
   }, [mockMode]);
 
-  const signMessageFn = useCallback(async (message: string): Promise<string> => {
-    if (mockMode || !activeProviderRef.current || !address) {
-      // Return mock signature
-      return '0x' + Array.from({ length: 130 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    }
-    return rawSign(activeProviderRef.current, message, address);
-  }, [address, mockMode]);
+  const signMessageFn = useCallback(
+    async (message: string): Promise<string> => {
+      if (mockMode || !address) {
+        return (
+          '0x' +
+          Array.from({ length: 130 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+        );
+      }
+      // Use Wagmi's signMessage or similar. For now, we might need to use the wagmi adapter's signer
+      // or just use the hook in the component.
+      // Since this is a context method, we need a way to invoke signing.
+      // simpler to throw an error "Use useSignMessage hook directly" or implement via wagmi config
+      throw new Error(
+        "Please use simple 'useSignMessage' hook from wagmi directly in components for now, or updating this context to wrap it.",
+      );
+    },
+    [address, mockMode],
+  );
 
   const isCorrectNetwork = chainId === env.chainId;
   const displayAddress = address ? formatAddress(address) : '';

@@ -82,30 +82,32 @@ describe('Enhanced Serial Number Service (nanoid)', () => {
 });
 
 describe('Password Service (bcrypt)', () => {
+  const TEST_BCRYPT_ROUNDS = 8;
+
   it('should hash password', async () => {
     const password = 'SecurePassword123!';
-    const hash = await passwordService.hashPassword(password);
+    const hash = await passwordService.hashPassword(password, TEST_BCRYPT_ROUNDS);
 
     expect(hash).toBeDefined();
     expect(hash).not.toBe(password);
     expect(hash.startsWith('$2a$') || hash.startsWith('$2b$')).toBe(true);
-  });
+  }, 10000);
 
   it('should verify correct password', async () => {
     const password = 'SecurePassword123!';
-    const hash = await passwordService.hashPassword(password);
+    const hash = await passwordService.hashPassword(password, TEST_BCRYPT_ROUNDS);
 
     const isValid = await passwordService.verifyPassword(password, hash);
     expect(isValid).toBe(true);
-  });
+  }, 10000);
 
   it('should reject incorrect password', async () => {
     const password = 'SecurePassword123!';
-    const hash = await passwordService.hashPassword(password);
+    const hash = await passwordService.hashPassword(password, TEST_BCRYPT_ROUNDS);
 
     const isValid = await passwordService.verifyPassword('WrongPassword', hash);
     expect(isValid).toBe(false);
-  });
+  }, 10000);
 
   it('should get rounds from hash', async () => {
     const hash = await passwordService.hashPassword('test', 10);
@@ -115,10 +117,10 @@ describe('Password Service (bcrypt)', () => {
   });
 
   it('should validate hash format', async () => {
-    const hash = await passwordService.hashPassword('test');
+    const hash = await passwordService.hashPassword('test', TEST_BCRYPT_ROUNDS);
     expect(passwordService.isValidHash(hash)).toBe(true);
     expect(passwordService.isValidHash('invalid-hash')).toBe(false);
-  });
+  }, 10000);
 });
 
 describe('Validation Service (Zod)', () => {

@@ -181,8 +181,7 @@ describe('BACIP Protocol', () => {
   });
 
   describe('Credential Encryption', () => {
-    it.skip('should encrypt credential for private storage', async () => {
-      // Skipped: Web Crypto API not fully available in test environment
+    it('should encrypt credential for private storage', async () => {
       const vc = await BACIPProtocol.createVerifiableCredential(
         'did:pistis:uni1',
         'did:pistis:stu1',

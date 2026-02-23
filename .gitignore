@@ -36,3 +36,6 @@ backend/.env
 *.pem
 *.key
 *.crt
+
+# Local backend runtime storage
+backend/data/

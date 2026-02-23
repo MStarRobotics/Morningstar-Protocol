@@ -10,12 +10,50 @@
  *  - ArXiv BACIP Protocol – Dual Blockchain with ZKP
  */
 
-import * as vc from '@digitalcredentials/vc';
-import { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020';
-import { Ed25519Signature2020 } from '@digitalcredentials/ed25519-signature-2020';
+import type * as DigitalCredentialsVC from '@digitalcredentials/vc';
+import type { Ed25519VerificationKey2020 } from '@digitalbazaar/ed25519-verification-key-2020';
+import type { Ed25519Signature2020 } from '@digitalcredentials/ed25519-signature-2020';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger';
 import { getErrorMessage } from './errorUtils';
+
+type VCLibrary = typeof DigitalCredentialsVC;
+
+let vcLib: VCLibrary | null = null;
+let Ed25519KeyCtor: typeof import('@digitalbazaar/ed25519-verification-key-2020').Ed25519VerificationKey2020 | null = null;
+let Ed25519SignatureCtor: typeof import('@digitalcredentials/ed25519-signature-2020').Ed25519Signature2020 | null = null;
+let depsLoaded = false;
+
+const ENGINE_UNAVAILABLE = 'W3C VC engine unavailable in this build';
+
+async function loadVcDeps(): Promise<boolean> {
+  if (depsLoaded && vcLib && Ed25519KeyCtor && Ed25519SignatureCtor) {
+    return true;
+  }
+
+  try {
+    const [vcModule, keyModule, sigModule] = await Promise.all([
+      import('@digitalcredentials/vc'),
+      import('@digitalbazaar/ed25519-verification-key-2020'),
+      import('@digitalcredentials/ed25519-signature-2020'),
+    ]);
+
+    vcLib = vcModule;
+    Ed25519KeyCtor = keyModule.Ed25519VerificationKey2020;
+    Ed25519SignatureCtor = sigModule.Ed25519Signature2020;
+    depsLoaded = true;
+    return true;
+  } catch (error) {
+    depsLoaded = true;
+    logger.warn('[W3CCredentialService] W3C VC engine not available, using lightweight fallbacks:', error);
+    return false;
+  }
+}
+
+async function getVcLibrary(): Promise<VCLibrary | null> {
+  const ok = await loadVcDeps();
+  return ok ? vcLib : null;
+}
 
 // ------------------------------------------------------------------
 // Types
@@ -83,10 +121,16 @@ let _issuerSuite: Ed25519Signature2020 | null = null;
  * Lazily initialise (or reinitialise) the issuer key-pair.
  * In production this would be loaded from a secure key store / HSM.
  */
-export async function getIssuerKeyPair(): Promise<Ed25519VerificationKey2020> {
+export async function getIssuerKeyPair(): Promise<Ed25519VerificationKey2020 | null> {
   if (_issuerKeyPair) return _issuerKeyPair;
 
-  _issuerKeyPair = await Ed25519VerificationKey2020.generate({
+  const vcAvailable = await loadVcDeps();
+  if (!vcAvailable || !Ed25519KeyCtor) {
+    logger.warn('[W3CCredentialService] Ed25519 key suite unavailable; VC issuance disabled');
+    return null;
+  }
+
+  _issuerKeyPair = await Ed25519KeyCtor.generate({
     id: 'did:polygon:issuer#key-1',
     controller: 'did:polygon:issuer',
   });
@@ -94,10 +138,13 @@ export async function getIssuerKeyPair(): Promise<Ed25519VerificationKey2020> {
   return _issuerKeyPair;
 }
 
-async function getIssuerSuite(): Promise<Ed25519Signature2020> {
+async function getIssuerSuite(): Promise<Ed25519Signature2020 | null> {
   if (_issuerSuite) return _issuerSuite;
+
   const keyPair = await getIssuerKeyPair();
-  _issuerSuite = new Ed25519Signature2020({ key: keyPair });
+  if (!keyPair || !Ed25519SignatureCtor) return null;
+
+  _issuerSuite = new Ed25519SignatureCtor({ key: keyPair });
   return _issuerSuite;
 }
 
@@ -242,7 +289,7 @@ export async function issueCredential(params: {
   expirationDate?: string;
 }): Promise<IssuanceResult> {
   try {
-    const suite = await getIssuerSuite();
+    const [vcEngine, suite] = await Promise.all([getVcLibrary(), getIssuerSuite()]);
 
     const credential: W3CCredential = {
       '@context': [
@@ -275,7 +322,15 @@ export async function issueCredential(params: {
       };
     }
 
-    const signedCredential = await vc.issue({
+    if (!vcEngine || !suite) {
+      return {
+        credential,
+        signed: false,
+        error: ENGINE_UNAVAILABLE,
+      };
+    }
+
+    const signedCredential = await vcEngine.issue({
       credential: { ...credential },
       suite,
       documentLoader: customDocumentLoader,
@@ -286,7 +341,14 @@ export async function issueCredential(params: {
     const msg = getErrorMessage(error);
     logger.error('VC issuance error:', msg);
     return {
-      credential: {} as W3CCredential,
+      credential: {
+        '@context': ['https://www.w3.org/2018/credentials/v1'],
+        id: `urn:uuid:${uuidv4()}`,
+        type: ['VerifiableCredential'],
+        issuer: params.issuerDid,
+        issuanceDate: new Date().toISOString(),
+        credentialSubject: params.claims,
+      },
       signed: false,
       error: msg,
     };
@@ -302,6 +364,8 @@ export async function verifyCredential(
   const checks: VerificationReport['checks'] = [];
 
   try {
+    const [vcEngine, suite] = await Promise.all([getVcLibrary(), getIssuerSuite()]);
+
     // Structure checks
     const hasContext = Array.isArray(credential['@context']) && credential['@context'].length > 0;
     checks.push({
@@ -347,23 +411,30 @@ export async function verifyCredential(
 
     // Proof verification via @digitalcredentials/vc
     if (credential.proof) {
-      try {
-        const suite = new Ed25519Signature2020();
-        const result = await vc.verifyCredential({
-          credential: { ...credential },
-          suite,
-          documentLoader: customDocumentLoader,
-        });
-        checks.push({
-          check: 'proof',
-          passed: result.verified === true,
-          detail: result.verified ? 'Cryptographic proof verified' : 'Proof verification failed',
-        });
-      } catch {
+      if (vcEngine && suite) {
+        try {
+          const result = await vcEngine.verifyCredential({
+            credential: { ...credential },
+            suite,
+            documentLoader: customDocumentLoader,
+          });
+          checks.push({
+            check: 'proof',
+            passed: result.verified === true,
+            detail: result.verified ? 'Cryptographic proof verified' : 'Proof verification failed',
+          });
+        } catch (verificationError) {
+          checks.push({
+            check: 'proof',
+            passed: false,
+            detail: getErrorMessage(verificationError) || 'Proof verification threw an error',
+          });
+        }
+      } else {
         checks.push({
           check: 'proof',
           passed: false,
-          detail: 'Proof verification threw an error',
+          detail: ENGINE_UNAVAILABLE,
         });
       }
     } else {
@@ -390,14 +461,18 @@ export async function createPresentation(params: {
   credentials: W3CCredential[];
   challenge?: string;
 }): Promise<W3CPresentation> {
-  const suite = await getIssuerSuite();
+  const [vcEngine, suite] = await Promise.all([getVcLibrary(), getIssuerSuite()]);
 
-  const presentation = vc.createPresentation({
+  if (!vcEngine || !suite) {
+    throw new Error(ENGINE_UNAVAILABLE);
+  }
+
+  const presentation = vcEngine.createPresentation({
     verifiableCredential: params.credentials,
     holder: params.holderDid,
   });
 
-  const signed = await vc.signPresentation({
+  const signed = await vcEngine.signPresentation({
     presentation,
     suite,
     challenge: params.challenge ?? uuidv4(),
@@ -415,8 +490,13 @@ export async function verifyPresentation(
   challenge?: string
 ): Promise<{ verified: boolean; error?: string }> {
   try {
-    const suite = new Ed25519Signature2020();
-    const result = await vc.verify({
+    const [vcEngine, suite] = await Promise.all([getVcLibrary(), getIssuerSuite()]);
+
+    if (!vcEngine || !suite) {
+      return { verified: false, error: ENGINE_UNAVAILABLE };
+    }
+
+    const result = await vcEngine.verify({
       presentation: { ...presentation },
       suite,
       challenge: challenge ?? '',

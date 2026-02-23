@@ -36,8 +36,8 @@ describe('Integration Test: Complete Credential Lifecycle', () => {
       data: {
         degree: 'Bachelor of Science',
         major: 'Computer Science',
-        gpa: 3.85,
-        graduationYear: 2024
+        gpa: '3.85',
+        graduationYear: '2024'
       },
       hiddenData: {
         studentId: 'STU123456',

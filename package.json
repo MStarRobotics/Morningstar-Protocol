@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "node scripts/run-test-coverage.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "postinstall": "node scripts/postinstall.mjs"
@@ -25,6 +25,9 @@
     "@google/genai": "^1.40.0",
     "@noble/ed25519": "^3.0.0",
     "@noble/hashes": "^2.0.1",
+    "@reown/appkit": "^1.8.17",
+    "@reown/appkit-adapter-wagmi": "^1.8.17",
+    "@tanstack/react-query": "^5.90.20",
     "@veramo/core": "^6.0.2",
     "@veramo/credential-w3c": "^6.0.2",
     "@veramo/did-manager": "^6.0.2",
@@ -47,8 +50,11 @@
     "rate-limiter-flexible": "^9.1.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-powerglitch": "^1.1.0",
     "recharts": "^3.7.0",
     "uuid": "^13.0.0",
+    "viem": "^2.45.2",
+    "wagmi": "^3.4.2",
     "zod": "^4.3.6"
   },
   "overrides": {

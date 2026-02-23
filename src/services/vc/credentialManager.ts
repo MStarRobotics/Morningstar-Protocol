@@ -92,7 +92,7 @@ export async function issueCredential(params: IssueCredentialParams): Promise<Is
   const statusListCredential = statusListService.exportCredential(
     issuerDID,
     `${issuerDID}/status-list/1`,
-    'revocation'
+    'revocation',
   );
 
   // 5. Build W3C VC Data Model v2.0 credential
@@ -145,11 +145,7 @@ export async function issueCredential(params: IssueCredentialParams): Promise<Is
   let transactionHash: string | undefined;
   try {
     const legacyCredential = toInternalCredential(signedCredential);
-    const result = await blockchainManager.issueCredential(
-      legacyCredential,
-      issuerDID,
-      subjectDID
-    );
+    const result = await blockchainManager.issueCredential(legacyCredential, issuerDID, subjectDID);
     transactionHash = result.publicTx.id;
   } catch (error) {
     logger.warn('[CredentialManager] Blockchain anchoring failed:', error);
@@ -180,7 +176,7 @@ export async function issueCredential(params: IssueCredentialParams): Promise<Is
       issuerDID,
       subjectDID,
       { type: credentialType, format },
-      '0xGovernance001' // Admin caller for demo
+      '0xGovernance001', // Admin caller for demo
     );
   } catch (error) {
     logger.warn('[CredentialManager] Smart contract registration failed:', error);
@@ -202,7 +198,7 @@ export async function issueCredential(params: IssueCredentialParams): Promise<Is
 export async function signCredential(
   credential: W3CVerifiableCredential,
   issuerDID: string,
-  proofType: string = 'Ed25519Signature2020'
+  proofType: string = 'Ed25519Signature2020',
 ): Promise<W3CVerifiableCredential> {
   // Get or generate issuer key pair
   let keyPair = issuerKeyStore.get(issuerDID);
@@ -221,17 +217,16 @@ export async function signCredential(
       });
       return signed as W3CVerifiableCredential;
     } catch (error) {
-      logger.warn('[CredentialManager] @digitalcredentials/vc signing failed, using native:', error);
+      logger.warn(
+        '[CredentialManager] @digitalcredentials/vc signing failed, using native:',
+        error,
+      );
     }
   }
 
   // Native signing fallback
   const credentialData = JSON.stringify(credential);
-  const proof = await createProof(
-    credentialData,
-    keyPair,
-    'assertionMethod'
-  );
+  const proof = await createProof(credentialData, keyPair, 'assertionMethod');
 
   return {
     ...credential,
@@ -248,8 +243,10 @@ export async function signCredential(
  */
 export function toInternalCredential(w3c: W3CVerifiableCredential): Credential {
   const issuerStr = typeof w3c.issuer === 'string' ? w3c.issuer : w3c.issuer.id;
-  const subject = Array.isArray(w3c.credentialSubject) ? w3c.credentialSubject[0] : w3c.credentialSubject;
-  const credType = w3c.type.find(t => t !== 'VerifiableCredential') || w3c.type[0];
+  const subject = Array.isArray(w3c.credentialSubject)
+    ? w3c.credentialSubject[0]
+    : w3c.credentialSubject;
+  const credType = w3c.type.find((t) => t !== 'VerifiableCredential') || w3c.type[0];
 
   // Separate visible and hidden data
   const data: Record<string, string> = {};
@@ -279,12 +276,12 @@ export function toInternalCredential(w3c: W3CVerifiableCredential): Credential {
 /**
  * Convert an internal Credential to W3C VC format.
  */
-export function fromInternalCredential(credential: Credential, issuerDID?: string): W3CVerifiableCredential {
+export function fromInternalCredential(
+  credential: Credential,
+  issuerDID?: string,
+): W3CVerifiableCredential {
   return {
-    '@context': [
-      'https://www.w3.org/2018/credentials/v1',
-      'https://www.w3.org/ns/credentials/v2',
-    ],
+    '@context': ['https://www.w3.org/2018/credentials/v1', 'https://www.w3.org/ns/credentials/v2'],
     id: `urn:credential:${credential.id}`,
     type: ['VerifiableCredential', credential.type],
     issuer: issuerDID || credential.issuer,
@@ -306,7 +303,7 @@ export function fromInternalCredential(credential: Credential, issuerDID?: strin
  */
 export async function getIssuerKeyPair(
   issuerDID: string,
-  proofType: string = 'Ed25519Signature2020'
+  proofType: string = 'Ed25519Signature2020',
 ): Promise<VCKeyPair> {
   let keyPair = issuerKeyStore.get(issuerDID);
   if (!keyPair) {
@@ -328,6 +325,12 @@ export function registerIssuerKeyPair(issuerDID: string, keyPair: VCKeyPair): vo
 // ---------------------------------------------------------------------------
 
 function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older environments (unlikely to be hit in modern browsers/Node)
+  // This maintains the original behavior if crypto is missing, but warns.
+  console.warn('crypto.randomUUID() not available, falling back to insecure Math.random()');
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     const v = c === 'x' ? r : (r & 0x3) | 0x8;

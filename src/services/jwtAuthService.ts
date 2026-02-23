@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 
 export interface JWTPayload {
   sub: string; // subject (user ID)
@@ -10,7 +10,7 @@ export interface JWTPayload {
 }
 
 export interface JWTOptions {
-  expiresIn?: string;
+  expiresIn?: SignOptions['expiresIn'];
   issuer?: string;
 }
 
@@ -23,13 +23,14 @@ class JWTAuthService {
   }
 
   generateToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'iss'>, options?: JWTOptions): string {
+    const expiresIn: SignOptions['expiresIn'] = options?.expiresIn ?? '24h';
     const fullPayload: JWTPayload = {
       ...payload,
       iss: options?.issuer || this.defaultIssuer
     };
 
     return jwt.sign(fullPayload, this.secret, {
-      expiresIn: options?.expiresIn || '24h',
+      expiresIn,
       algorithm: 'HS256'
     });
   }

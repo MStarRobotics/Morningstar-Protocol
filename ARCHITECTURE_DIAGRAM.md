@@ -2,7 +2,7 @@
 
 ## System Overview with Research Paper Features
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         USER INTERFACES                                      │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
@@ -63,9 +63,9 @@
 ┌──────────────────────────────────▼───────────────────────────────────────────┐
 │                          STORAGE LAYER                                       │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │   IPFS   │  │  Smart   │  │  Local   │  │  Cache   │  │  Email   │     │
-│  │Documents │  │Contracts │  │ Storage  │  │  Layer   │  │  Queue   │     │
-│  │          │  │          │  │          │  │          │  │  (NEW)   │     │
+│  │   IPFS   │  │  Smart   │  │  Local   │  │  Cache   │  │  File    │     │
+│  │Documents │  │Contracts │  │ Storage  │  │  Layer   │  │  System  │     │
+│  │          │  │          │  │ (Browser)│  │          │  │ (Backend)│     │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘     │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -74,7 +74,7 @@
 
 ## Credential Issuance Flow (Enhanced with Research Features)
 
-```
+```text
 ┌─────────────┐
 │  University │
 │   Issues    │
@@ -163,7 +163,7 @@
 
 ## Verification Flow (Enhanced)
 
-```
+```text
 ┌─────────────┐
 │  Employer   │
 │   Scans     │
@@ -246,7 +246,7 @@
 
 ## Multi-Organization Channel Architecture (NEW)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────┐
 │                    CHANNEL ARCHITECTURE                        │
 │                                                                │
@@ -284,7 +284,7 @@
 
 ## Performance Monitoring Dashboard (NEW)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────┐
 │              PERFORMANCE MONITORING DASHBOARD                  │
 │                                                                │
@@ -321,7 +321,7 @@
 
 ## Security Architecture (Complete)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────┐
 │                    SECURITY LAYERS                             │
 │                                                                │
@@ -372,7 +372,7 @@
 
 ## Technology Stack (Complete)
 
-```
+```text
 Frontend:
   • React 19.2.4
   • TypeScript 5.8.2
@@ -410,7 +410,7 @@ Standards Compliance:
 
 ## Deployment Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────┐
 │                    PRODUCTION DEPLOYMENT                       │
 │                                                                │
@@ -432,6 +432,7 @@ Standards Compliance:
 │  • IPFS: Pinata / Infura                                       │
 │  • Database: MongoDB / PostgreSQL                              │
 │  • Cache: Redis                                                │
+│  • Filesystem: Local JSON persistence (Backend)                │
 │  • Email Queue: AWS SES / SendGrid (NEW)                       │
 │                                                                │
 │  Monitoring:                                                   │
