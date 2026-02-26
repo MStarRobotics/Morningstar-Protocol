@@ -608,6 +608,7 @@ describe('BlockchainManager', () => {
       expect(stats.private.totalCredentials).toBe(1);
     });
 
+    // Two full issuance cycles (public + private persistence) can exceed 5s under coverage instrumentation.
     it('should accumulate stats across multiple issuances', async () => {
       await manager.issueCredential(
         makeCredential(),
@@ -624,6 +625,6 @@ describe('BlockchainManager', () => {
       expect(stats.public.totalBlocks).toBe(3); // genesis + 2 mined
       expect(stats.public.totalTransactions).toBe(2);
       expect(stats.private.totalCredentials).toBe(2);
-    });
+    }, 20_000);
   });
 });

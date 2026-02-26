@@ -1,5 +1,6 @@
-import { api, env } from './env';
+import { api } from './env';
 import { logger } from './logger';
+import { authService } from './authService';
 import type { Institution } from '../types';
 
 export interface CreateInstitutionInput {
@@ -115,14 +116,8 @@ async function parseApiError(response: Response, fallback: string): Promise<stri
 }
 
 function getWriteHeaders(): HeadersInit {
-  const token = env.governanceBearerToken.trim();
-  if (!token) {
-    throw new Error('Missing VITE_GOVERNANCE_BEARER_TOKEN. Configure a governance bearer token to perform RBAC writes.');
-  }
-
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -153,7 +148,7 @@ export async function fetchGovernanceInstitutions(): Promise<Institution[]> {
 export async function createGovernanceInstitution(
   input: CreateInstitutionInput,
 ): Promise<Institution> {
-  const response = await fetch(api.url('/api/governance/institutions'), {
+  const response = await authService.fetchWithSessionAuth('/api/governance/institutions', {
     method: 'POST',
     headers: getWriteHeaders(),
     body: JSON.stringify({
@@ -176,11 +171,14 @@ export async function updateGovernanceInstitution(
   institutionId: string,
   updates: UpdateInstitutionInput,
 ): Promise<Institution> {
-  const response = await fetch(api.url(`/api/governance/institutions/${encodeURIComponent(institutionId)}`), {
-    method: 'PATCH',
-    headers: getWriteHeaders(),
-    body: JSON.stringify(updates),
-  });
+  const response = await authService.fetchWithSessionAuth(
+    `/api/governance/institutions/${encodeURIComponent(institutionId)}`,
+    {
+      method: 'PATCH',
+      headers: getWriteHeaders(),
+      body: JSON.stringify(updates),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await parseApiError(response, 'Failed to update institution'));
@@ -191,7 +189,7 @@ export async function updateGovernanceInstitution(
 }
 
 export async function fetchRoleAccessRequests(): Promise<GovernanceRoleAccessRequest[]> {
-  const response = await fetch(api.url('/api/auth/role/requests'), {
+  const response = await authService.fetchWithSessionAuth('/api/auth/role/requests', {
     headers: getWriteHeaders(),
   });
 
@@ -214,7 +212,7 @@ export async function reviewRoleAccessRequest(
   approve: boolean,
   reviewNote?: string,
 ): Promise<{ requestId: string; status: GovernanceRoleAccessRequest['status'] }> {
-  const response = await fetch(api.url('/api/auth/role/approve'), {
+  const response = await authService.fetchWithSessionAuth('/api/auth/role/approve', {
     method: 'POST',
     headers: getWriteHeaders(),
     body: JSON.stringify({

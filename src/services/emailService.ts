@@ -7,7 +7,8 @@ export interface EmailNotification {
   qrCode?: string;
 }
 
-import { api, env } from './env';
+import { env } from './env';
+import { authService } from './authService';
 
 class EmailService {
   private emailQueue: EmailNotification[] = [];
@@ -105,7 +106,7 @@ Morningstar Credentials Team
   private async sendEmail(email: EmailNotification): Promise<void> {
     let response: Response;
     try {
-      response = await fetch(api.url('/api/email/notify'), {
+      response = await authService.fetchWithSessionAuth('/api/email/notify', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

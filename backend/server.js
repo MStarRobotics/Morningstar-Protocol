@@ -61,7 +61,6 @@ const RESPONSE_COMPRESSION_MIN_BYTES = toInt(
 const SLOW_REQUEST_THRESHOLD_MS = toInt(process.env.SLOW_REQUEST_THRESHOLD_MS, 800, 50, 30_000);
 const HEALTH_CACHE_MAX_AGE_SECONDS = toInt(process.env.HEALTH_CACHE_MAX_AGE_SECONDS, 5, 0, 60);
 const isProduction = process.env.NODE_ENV === 'production';
-const API_AUTH_MODE = normalizeApiAuthMode(process.env.API_AUTH_MODE, isProduction ? 'required' : 'off');
 const EXPOSE_EMAIL_HEALTH_DETAILS = parseBoolean(process.env.EXPOSE_EMAIL_HEALTH_DETAILS, !isProduction);
 const AUTH_TOKEN_SECRET = String(
   process.env.AUTH_TOKEN_SECRET || process.env.JWT_SECRET || `dev-auth-${randomUUID()}`,
@@ -85,6 +84,11 @@ const UNIVERSITY_DOMAIN_DATASET_URL = String(
   'https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json',
 ).trim();
 const DISPOSABLE_DOMAIN_BLOCKLIST_URL = String(process.env.DISPOSABLE_DOMAIN_BLOCKLIST_URL || '').trim();
+const GOVERNANCE_BOOTSTRAP_WALLETS = new Set(
+  [...parseTokenSet(process.env.GOVERNANCE_BOOTSTRAP_WALLETS)]
+    .map((entry) => normalizeWalletAddress(entry))
+    .filter(Boolean),
+);
 
 const app = express();
 app.disable('x-powered-by');
@@ -226,14 +230,6 @@ function normalizeSmtpProvider(value) {
   return normalized || 'sendgrid';
 }
 
-function normalizeApiAuthMode(value, fallback = 'off') {
-  const normalized = String(value || fallback).trim().toLowerCase();
-  if (normalized === 'off' || normalized === 'required') {
-    return normalized;
-  }
-  return fallback;
-}
-
 function parseTokenSet(raw) {
   return new Set(
     String(raw || '')
@@ -243,16 +239,6 @@ function parseTokenSet(raw) {
   );
 }
 
-const API_TOKENS = {
-  issuer: parseTokenSet(process.env.API_ISSUER_TOKEN || process.env.API_WRITE_TOKEN),
-  governance: parseTokenSet(process.env.API_GOVERNANCE_TOKEN),
-  admin: parseTokenSet(process.env.API_ADMIN_TOKEN),
-};
-
-function getConfiguredApiTokenCount() {
-  return API_TOKENS.issuer.size + API_TOKENS.governance.size + API_TOKENS.admin.size;
-}
-
 function extractBearerToken(authorizationHeader) {
   if (typeof authorizationHeader !== 'string') {
     return '';
@@ -260,54 +246,6 @@ function extractBearerToken(authorizationHeader) {
 
   const match = authorizationHeader.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : '';
-}
-
-function resolveRoleFromToken(token) {
-  if (!token) return null;
-  if (API_TOKENS.admin.has(token)) return 'admin';
-  if (API_TOKENS.governance.has(token)) return 'governance';
-  if (API_TOKENS.issuer.has(token)) return 'issuer';
-  return null;
-}
-
-function getRequestRole(req) {
-  const token = extractBearerToken(req.headers.authorization);
-  return resolveRoleFromToken(token);
-}
-
-function requireApiRoles(...roles) {
-  return (req, res, next) => {
-    if (API_AUTH_MODE === 'off') {
-      return next();
-    }
-
-    if (getConfiguredApiTokenCount() === 0) {
-      return sendError(res, 503, 'API authorization is enabled but no tokens are configured', {
-        code: 'AUTH_NOT_CONFIGURED',
-      });
-    }
-
-    const token = extractBearerToken(req.headers.authorization);
-    if (!token) {
-      return sendError(res, 401, 'Missing bearer token', { code: 'AUTH_TOKEN_REQUIRED' });
-    }
-
-    const role = resolveRoleFromToken(token);
-    if (!role) {
-      return sendError(res, 401, 'Invalid bearer token', { code: 'AUTH_TOKEN_INVALID' });
-    }
-
-    if (roles.length > 0 && role !== 'admin' && !roles.includes(role)) {
-      return sendError(res, 403, 'Token is not authorized for this endpoint', {
-        code: 'AUTH_FORBIDDEN',
-        role,
-        requiredRoles: roles,
-      });
-    }
-
-    req.authRole = role;
-    return next();
-  };
 }
 
 function isPlainObject(value) {
@@ -650,6 +588,62 @@ function requireUserSession(req, res, next) {
   req.userSession = parsed.session;
   req.userTokenPayload = parsed.payload;
   return next();
+}
+
+function getOptionalSessionRole(req) {
+  const parsed = getSessionFromAccessToken(req);
+  if (parsed.error) {
+    return null;
+  }
+  return USER_ALLOWED_ROLES.has(parsed.session.role) ? parsed.session.role : 'guest';
+}
+
+function requireUserRoles(...roles) {
+  return (req, res, next) => {
+    const parsed = getSessionFromAccessToken(req);
+    if (parsed.error) {
+      return sendError(res, 401, parsed.error, { code: parsed.code });
+    }
+
+    const role = USER_ALLOWED_ROLES.has(parsed.session.role) ? parsed.session.role : 'guest';
+    if (roles.length > 0 && !roles.includes(role)) {
+      return sendError(res, 403, 'Session role is not authorized for this endpoint', {
+        code: 'AUTH_FORBIDDEN',
+        role,
+        requiredRoles: roles,
+      });
+    }
+
+    req.userSession = parsed.session;
+    req.userTokenPayload = parsed.payload;
+    req.authRole = role;
+    return next();
+  };
+}
+
+function isGovernanceBootstrapWallet(walletAddress) {
+  const normalized = normalizeWalletAddress(walletAddress);
+  if (!normalized) return false;
+  return GOVERNANCE_BOOTSTRAP_WALLETS.has(normalized);
+}
+
+function applyGovernanceBootstrapRole(session, reason = 'governance-bootstrap') {
+  if (!session?.walletAddress || !isGovernanceBootstrapWallet(session.walletAddress)) {
+    return false;
+  }
+
+  session.role = 'governance';
+  session.assuranceLevel = 'high';
+  session.updatedAt = new Date().toISOString();
+  updateSessionRisk(session, reason, {
+    disposableDomain: false,
+    unknownAcademicDomain: false,
+    otpFailures: session.otpFailures,
+    privilegedRoleRequest: true,
+    captchaMissing: false,
+    mockWalletBound: session.walletBindingMode === 'mock',
+  });
+  return true;
 }
 
 function getDomainFromEmail(email) {
@@ -1663,9 +1657,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.get('/api/email/health', (req, res) => {
-  const requesterRole = getRequestRole(req);
+  const requesterRole = getOptionalSessionRole(req);
   const health = getEmailHealthPayload({
-    includeSensitive: EXPOSE_EMAIL_HEALTH_DETAILS || requesterRole === 'admin',
+    includeSensitive: EXPOSE_EMAIL_HEALTH_DETAILS || requesterRole === 'governance',
   });
   const statusCode = health.status === 'error' ? 503 : 200;
   res.status(statusCode).json(health);
@@ -1805,11 +1799,16 @@ app.post('/api/auth/session/bind-wallet', authSessionLimiter, async (req, res) =
     captchaMissing: false,
     mockWalletBound: walletBindingMode === 'mock',
   });
+  const governanceBootstrapApplied = applyGovernanceBootstrapRole(
+    session,
+    'governance-bootstrap-wallet-bind',
+  );
 
   const tokens = issueTokenPairForSession(session);
   res.json({
     success: true,
     walletBindingMode,
+    governanceBootstrapApplied,
     session: tokens.claims,
     tokens,
   });
@@ -2092,6 +2091,18 @@ app.post('/api/auth/role/request', authRoleLimiter, requireUserSession, (req, re
     });
   }
 
+  if (role === 'governance' && applyGovernanceBootstrapRole(session, 'governance-bootstrap-role-request')) {
+    const tokens = issueTokenPairForSession(session);
+    return res.json({
+      success: true,
+      status: 'approved',
+      role,
+      reason: 'bootstrap_allowlist',
+      session: tokens.claims,
+      tokens,
+    });
+  }
+
   if (PRIVILEGED_USER_ROLES.has(role)) {
     const existing = [...roleAccessRequests.values()].find(
       (request) => request.sessionId === session.id && request.requestedRole === role && request.status === 'pending',
@@ -2145,7 +2156,7 @@ app.post('/api/auth/role/request', authRoleLimiter, requireUserSession, (req, re
   });
 });
 
-app.get('/api/auth/role/requests', requireApiRoles('governance'), (_req, res) => {
+app.get('/api/auth/role/requests', requireUserRoles('governance'), (_req, res) => {
   const requests = [...roleAccessRequests.values()]
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .slice(0, 200)
@@ -2165,7 +2176,7 @@ app.get('/api/auth/role/requests', requireApiRoles('governance'), (_req, res) =>
   res.json({ success: true, requests });
 });
 
-app.post('/api/auth/role/approve', requireApiRoles('governance'), (req, res) => {
+app.post('/api/auth/role/approve', requireUserRoles('governance'), (req, res) => {
   const requestId = String(req.body?.requestId || '').trim();
   const approve = req.body?.approve !== false;
   const reviewNote = isNonEmptyString(req.body?.reviewNote, 500) ? String(req.body.reviewNote).trim() : '';
@@ -2431,7 +2442,7 @@ app.get('/api/governance/institutions', async (_req, res) => {
 app.post(
   '/api/governance/institutions',
   governanceWriteLimiter,
-  requireApiRoles('governance'),
+  requireUserRoles('governance'),
   async (req, res) => {
     if (getSerializedSize(req.body) > 100_000) {
       return sendError(res, 413, 'Payload too large');
@@ -2512,7 +2523,7 @@ app.post(
 app.patch(
   '/api/governance/institutions/:id',
   governanceWriteLimiter,
-  requireApiRoles('governance'),
+  requireUserRoles('governance'),
   async (req, res) => {
     if (getSerializedSize(req.body) > 50_000) {
       return sendError(res, 413, 'Payload too large');
@@ -2640,7 +2651,7 @@ app.get('/api/did/:did', async (req, res) => {
   }
 });
 
-app.post('/api/did', didWriteLimiter, requireApiRoles('issuer', 'governance'), async (req, res) => {
+app.post('/api/did', didWriteLimiter, requireUserRoles('issuer', 'governance'), async (req, res) => {
   if (getSerializedSize(req.body) > 200_000) {
     return sendError(res, 413, 'Payload too large');
   }
@@ -2684,7 +2695,7 @@ app.post('/api/did', didWriteLimiter, requireApiRoles('issuer', 'governance'), a
   }
 });
 
-app.put('/api/did/:did', didWriteLimiter, requireApiRoles('issuer', 'governance'), async (req, res) => {
+app.put('/api/did/:did', didWriteLimiter, requireUserRoles('issuer', 'governance'), async (req, res) => {
   if (getSerializedSize(req.body) > 200_000) {
     return sendError(res, 413, 'Payload too large');
   }
@@ -2733,7 +2744,7 @@ app.put('/api/did/:did', didWriteLimiter, requireApiRoles('issuer', 'governance'
   }
 });
 
-app.delete('/api/did/:did', didWriteLimiter, requireApiRoles('issuer', 'governance'), async (req, res) => {
+app.delete('/api/did/:did', didWriteLimiter, requireUserRoles('issuer', 'governance'), async (req, res) => {
   const did = normalizeDidParam(req.params.did);
   if (!isNonEmptyString(did, 300)) {
     return sendError(res, 400, 'Invalid DID');
@@ -2775,7 +2786,7 @@ app.delete('/api/did/:did', didWriteLimiter, requireApiRoles('issuer', 'governan
 app.post(
   '/api/blockchain/transaction',
   blockchainWriteLimiter,
-  requireApiRoles('issuer', 'governance'),
+  requireUserRoles('issuer', 'governance'),
   async (req, res) => {
   if (getSerializedSize(req.body) > 300_000) {
     return sendError(res, 413, 'Payload too large');
@@ -2801,7 +2812,7 @@ app.post(
   },
 );
 
-app.post('/api/blockchain/block', blockchainWriteLimiter, requireApiRoles('governance'), async (req, res) => {
+app.post('/api/blockchain/block', blockchainWriteLimiter, requireUserRoles('governance'), async (req, res) => {
   if (getSerializedSize(req.body) > 10_000) {
     return sendError(res, 413, 'Payload too large');
   }
@@ -2844,7 +2855,7 @@ app.post('/api/blockchain/block', blockchainWriteLimiter, requireApiRoles('gover
 app.post(
   '/api/blockchain/private/store',
   blockchainWriteLimiter,
-  requireApiRoles('issuer', 'governance'),
+  requireUserRoles('issuer', 'governance'),
   async (req, res) => {
   if (getSerializedSize(req.body) > 750_000) {
     return sendError(res, 413, 'Payload too large');
@@ -2876,7 +2887,7 @@ app.post(
 // Email and MFA
 // ---------------------------------------------------------------------------
 
-app.post('/api/email/notify', mfaLimiter, requireApiRoles('issuer', 'governance'), async (req, res) => {
+app.post('/api/email/notify', mfaLimiter, requireUserRoles('issuer', 'governance'), async (req, res) => {
   const to = req.body?.to;
   const subject = req.body?.subject;
   const body = req.body?.body;
@@ -2924,7 +2935,7 @@ app.post('/api/email/notify', mfaLimiter, requireApiRoles('issuer', 'governance'
   }
 });
 
-app.post('/api/mfa/send-otp', mfaLimiter, requireApiRoles('issuer', 'governance'), async (req, res) => {
+app.post('/api/mfa/send-otp', mfaLimiter, requireUserRoles('issuer', 'governance'), async (req, res) => {
   const method = String(req.body?.method || '').toLowerCase();
   const contact = typeof req.body?.contact === 'string' ? req.body.contact.trim() : '';
   if (!method || !contact) {
@@ -3052,13 +3063,11 @@ async function startServer() {
       console.info(`[morningstar-api] Unconfigured optional services: ${missingOptional.join(', ')}`);
     }
 
-    const authTokenCount = getConfiguredApiTokenCount();
-    console.log(`[morningstar-api] API auth mode=${API_AUTH_MODE}`);
-    if (API_AUTH_MODE === 'required' && authTokenCount === 0) {
-      console.warn('[morningstar-api] API_AUTH_MODE=required but no API_*_TOKEN values are configured.');
-    }
     console.log(
       `[morningstar-api] User auth enabled (accessTTL=${ACCESS_TOKEN_TTL_SECONDS}s refreshTTL=${REFRESH_TOKEN_TTL_SECONDS}s sessionTTL=${AUTH_SESSION_TTL_SECONDS}s)`,
+    );
+    console.log(
+      `[morningstar-api] Governance bootstrap wallets configured=${GOVERNANCE_BOOTSTRAP_WALLETS.size}`,
     );
     if (!HAS_STATIC_AUTH_SECRET) {
       console.warn('[morningstar-api] AUTH_TOKEN_SECRET is not set; using ephemeral in-memory secret.');

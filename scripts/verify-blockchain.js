@@ -4,7 +4,7 @@
  * Optional:
  *   API_URL=http://localhost:3001
  *   EMAIL_EXPECTED_MODE=auto|mock|smtp
- *   API_AUTH_TOKEN=<bearer_token_for_protected_write_endpoints>
+ *   API_AUTH_TOKEN=<user_access_token_for_protected_write_endpoints>
  */
 
 const API_URL = process.env.API_URL || 'http://localhost:3001';
@@ -221,9 +221,13 @@ async function main() {
   console.log('--- Testing Blockchain + Email Backend API ---');
   console.log(`API_URL=${API_URL}`);
   console.log(`EMAIL_EXPECTED_MODE=${EMAIL_EXPECTED_MODE}`);
-  if (API_AUTH_TOKEN) {
-    console.log('API_AUTH_TOKEN=provided');
+  if (!API_AUTH_TOKEN) {
+    console.error(
+      'Missing API_AUTH_TOKEN. Protected write endpoints now require a user session access token.',
+    );
+    process.exit(1);
   }
+  console.log('API_AUTH_TOKEN=provided');
 
   const healthOk = await runCheck('Health check', checkHealth);
   if (!healthOk) {

@@ -13,6 +13,7 @@ import { sha256, generateKeyPair, verifySignature } from './cryptography';
 import { createVeramoDID, resolveVeramoDID, type VeramoDIDResult } from './veramoAgent';
 import { api, env } from './env';
 import { logger } from './logger';
+import { authService } from './authService';
 
 export interface DIDDocument {
   '@context': string[];
@@ -367,7 +368,7 @@ export async function registerDID(
   const persistedLocally = upsertLocalDID(didDocument, metadata);
 
   try {
-    const res = await fetch(api.url('/api/did'), {
+    const res = await authService.fetchWithSessionAuth('/api/did', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ didDocument, metadata }),
@@ -407,7 +408,7 @@ export async function updateDIDDocument(
   }
 
   try {
-    const res = await fetch(api.url(`/api/did/${did}`), {
+    const res = await authService.fetchWithSessionAuth(`/api/did/${did}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ didDocument: updates }),
@@ -444,7 +445,7 @@ export async function revokeDID(did: string): Promise<boolean> {
   }
 
   try {
-    const res = await fetch(api.url(`/api/did/${did}`), {
+    const res = await authService.fetchWithSessionAuth(`/api/did/${did}`, {
       method: 'DELETE',
     });
     return res.ok || revokedLocally;

@@ -3,7 +3,7 @@
  * Usage: node scripts/verify-did.js
  * Optional:
  *   API_URL=http://localhost:3001
- *   API_AUTH_TOKEN=<bearer_token_for_protected_write_endpoints>
+ *   API_AUTH_TOKEN=<user_access_token_for_protected_write_endpoints>
  */
 
 const API_BASE = process.env.API_URL || 'http://localhost:3001';
@@ -20,9 +20,13 @@ function authHeaders(headers = {}) {
 async function test() {
   console.log('--- Testing DID Backend API ---');
   console.log(`API_URL=${API_BASE}`);
-  if (API_AUTH_TOKEN) {
-    console.log('API_AUTH_TOKEN=provided');
+  if (!API_AUTH_TOKEN) {
+    console.error(
+      'Missing API_AUTH_TOKEN. DID write endpoints now require a user session access token.',
+    );
+    process.exit(1);
   }
+  console.log('API_AUTH_TOKEN=provided');
 
   // 1. Health check
   try {

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "node scripts/dev-all.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -13,6 +14,10 @@
     "test:coverage:strict": "node scripts/run-test-coverage.mjs --strict",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
+    "setup": "node scripts/setup-dev.mjs",
+    "setup:docker": "node scripts/setup-dev.mjs --docker",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
     "audit:all": "node scripts/security-audit.mjs",
     "build:check-warnings": "node scripts/check-build-warnings.mjs",
     "postinstall": "node scripts/postinstall.mjs"
@@ -61,7 +66,9 @@
     "zod": "^4.3.6"
   },
   "overrides": {
-    "@veramo/credential-ld": "file:./stubs/credential-ld-noop"
+    "@veramo/credential-ld": "file:./stubs/credential-ld-noop",
+    "bn.js": "5.2.3",
+    "rollup": "4.59.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

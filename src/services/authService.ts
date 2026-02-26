@@ -187,6 +187,10 @@ class AuthService {
     });
   }
 
+  async fetchWithSessionAuth(input: string, init: RequestInit = {}): Promise<Response> {
+    return this.fetchWithAuthRetry(input, init);
+  }
+
   async startSession(walletAddress: string, captchaToken?: string): Promise<SessionStartResponse> {
     const response = await fetch(api.url('/api/auth/session/start'), {
       method: 'POST',

@@ -45,7 +45,6 @@ export const env = {
 
   // Backend API proxy (required in production)
   apiProxyUrl: normalizeBaseUrl(str('VITE_API_PROXY_URL')),
-  governanceBearerToken: str('VITE_GOVERNANCE_BEARER_TOKEN'),
 
   // Blockchain
   blockchainNetwork: str('VITE_BLOCKCHAIN_NETWORK', 'polygon-amoy'),

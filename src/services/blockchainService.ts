@@ -28,6 +28,7 @@ import { emailService } from './emailService';
 import { merkleTreeService } from './merkleTreeService';
 import { performanceMonitor } from './performanceMonitor';
 import { api, env } from './env';
+import { authService } from './authService';
 
 const persistenceWarnings = new Set<string>();
 
@@ -171,7 +172,7 @@ export class PublicBlockchain {
 
     // Persist to backend
     try {
-      await fetch(api.url('/api/blockchain/transaction'), {
+      await authService.fetchWithSessionAuth('/api/blockchain/transaction', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction }),
@@ -223,7 +224,7 @@ export class PublicBlockchain {
 
     // Persist mined block to backend
     try {
-      await fetch(api.url('/api/blockchain/block'), {
+      await authService.fetchWithSessionAuth('/api/blockchain/block', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ validator: validatorAddress }),
@@ -386,7 +387,7 @@ export class PrivateBlockchain {
 
       // Persist to backend
       try {
-        await fetch(api.url('/api/blockchain/private/store'), {
+        await authService.fetchWithSessionAuth('/api/blockchain/private/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
