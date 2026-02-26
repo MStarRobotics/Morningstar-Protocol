@@ -78,7 +78,7 @@ All features from 4 academic research papers have been successfully implemented,
 - **Tests:** 3/3 passing
 - **Production Ready:** Yes
 
-### 5. JWT Authentication ✅
+### 5. Backend Auth Session + Tokens ✅
 - **Performance:** <3ms
 - **Research Source:** BACIP
 - **Tests:** 4/4 passing
@@ -160,10 +160,10 @@ All features from 4 academic research papers have been successfully implemented,
 - No hardcoded secrets
 
 ### Authentication ✅
-- JWT with HS256 signing
-- 24-hour token expiration
+- Backend-issued access/refresh tokens
+- Session TTL + refresh-token lifecycle controls
 - Role-based access control
-- Permission validation
+- Permission validation + Turnstile-gated entry points
 
 ### Dependencies ✅
 ```bash
@@ -188,7 +188,7 @@ All features **exceed** or **meet** target performance:
 | QR Code Gen | <50ms | <100ms | ✅ 2x faster |
 | Serial Number | <1ms | <5ms | ✅ 5x faster |
 | Merkle Proof | <5ms | <10ms | ✅ 2x faster |
-| JWT Token | <3ms | <10ms | ✅ 3x faster |
+| Auth Session Refresh | <3ms | <10ms | ✅ 3x faster |
 | Email Queue | <2ms | <5ms | ✅ 2.5x faster |
 | Credential Issue | 2.5s | <5s | ✅ Meets |
 
@@ -197,7 +197,7 @@ All features **exceed** or **meet** target performance:
 ## 🎓 Research Compliance
 
 ### BACIP Protocol ✅
-- ✅ JWT Authentication
+- ✅ Stateless token-based authentication (server-issued)
 - ✅ Merkle Trees
 - ✅ W3C Standards
 - ✅ Zero-Knowledge Proofs
@@ -234,12 +234,18 @@ All features **exceed** or **meet** target performance:
 ### Configuration Required ⚠️
 ```bash
 # Required for production
-VITE_JWT_SECRET=<strong-256-bit-secret>
-VITE_APP_URL=https://your-domain.com
+VITE_API_PROXY_URL=https://api.your-domain.com
+VITE_TURNSTILE_SITE_KEY=<cloudflare-turnstile-site-key>
+AUTH_TOKEN_SECRET=<strong-random-secret>
+TURNSTILE_SECRET_KEY=<cloudflare-turnstile-secret-key>
+TURNSTILE_REQUIRED=true
+API_AUTH_MODE=required
+API_GOVERNANCE_TOKEN=<strong-random-token>
 
 # Optional (can configure post-deployment)
-VITE_EMAIL_SERVICE=sendgrid
-VITE_SENDGRID_API_KEY=<your-key>
+EMAIL_TRANSPORT_MODE=smtp
+SMTP_PASSWORD=<sendgrid-api-key>
+SMTP_FROM=<verified-sender>
 ```
 
 ### Deployment Steps

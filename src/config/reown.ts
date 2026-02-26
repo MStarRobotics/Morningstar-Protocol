@@ -37,7 +37,7 @@ createAppKit({
   features: {
     analytics: true,
     socials: ['google', 'x', 'github', 'discord', 'apple'],
-    email: true, // Enables email/OTP login (disposable emails work via this standard flow)
+    email: false, // Student verification now uses server-side institutional email flow
   },
   themeMode: 'dark',
   themeVariables: {

@@ -5,13 +5,12 @@
  * Handles event listeners, auto-detection, mock fallback, and network checks.
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { detectWallets, formatAddress, isMockMode, type DetectedWallet } from './walletService';
 import {
   useAppKit,
   useAppKitAccount,
   useAppKitNetwork,
-  useWalletInfo,
   useDisconnect,
 } from '@reown/appkit/react';
 import { polygonAmoy } from '@reown/appkit/networks';
@@ -57,10 +56,10 @@ const WalletContext = createContext<WalletState | null>(null);
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Reown AppKit Hooks
-  const { open, close } = useAppKit();
+  const { open } = useAppKit();
   const { address: appKitAddress, isConnected, status } = useAppKitAccount();
-  const { chainId: appKitChainId } = useAppKitNetwork();
-  const { walletInfo } = useWalletInfo();
+  const { chainId: appKitChainId, switchNetwork: appKitSwitchNetwork } = useAppKitNetwork();
+  const { disconnect: appKitDisconnect } = useDisconnect();
 
   // Local state to maintain compatibility with existing context interface
   const [wallets, setWallets] = useState<DetectedWallet[]>([]);
@@ -82,7 +81,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Connection
   const connect = useCallback(
-    async (walletName?: string): Promise<string | null> => {
+    async (_walletName?: string): Promise<string | null> => {
       setError(null);
 
       // Mock mode
@@ -117,21 +116,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
     try {
-      await useDisconnect().disconnect();
+      await appKitDisconnect();
     } catch (e) {
       logger.warn('Disconnect failed', e);
     }
-  }, [mockMode]);
+  }, [appKitDisconnect, mockMode]);
 
   const switchNetwork = useCallback(async () => {
     if (mockMode) return;
     try {
-      await useAppKitNetwork().switchNetwork(polygonAmoy);
+      await appKitSwitchNetwork(polygonAmoy);
     } catch (err) {
       logger.error('[Wallet] Network switch failed:', err);
       setError('Failed to switch network');
     }
-  }, [mockMode]);
+  }, [appKitSwitchNetwork, mockMode]);
 
   const signMessageFn = useCallback(
     async (message: string): Promise<string> => {
@@ -141,13 +140,22 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           Array.from({ length: 130 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
         );
       }
-      // Use Wagmi's signMessage or similar. For now, we might need to use the wagmi adapter's signer
-      // or just use the hook in the component.
-      // Since this is a context method, we need a way to invoke signing.
-      // simpler to throw an error "Use useSignMessage hook directly" or implement via wagmi config
-      throw new Error(
-        "Please use simple 'useSignMessage' hook from wagmi directly in components for now, or updating this context to wrap it.",
-      );
+
+      const provider = window.ethereum;
+      if (!provider || typeof provider.request !== 'function') {
+        throw new Error('No injected wallet provider available for message signing');
+      }
+
+      const signature = await provider.request<string>({
+        method: 'personal_sign',
+        params: [message, address],
+      });
+
+      if (typeof signature !== 'string' || !signature.startsWith('0x')) {
+        throw new Error('Wallet returned an invalid signature');
+      }
+
+      return signature;
     },
     [address, mockMode],
   );
@@ -155,20 +163,36 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const isCorrectNetwork = chainId === env.chainId;
   const displayAddress = address ? formatAddress(address) : '';
 
-  const value: WalletState = {
-    wallets,
-    address,
-    displayAddress,
-    chainId,
-    isCorrectNetwork,
-    isConnecting,
-    isMock: mockMode,
-    error,
-    connect,
-    disconnect,
-    switchNetwork,
-    signMessage: signMessageFn,
-  };
+  const value = useMemo<WalletState>(
+    () => ({
+      wallets,
+      address,
+      displayAddress,
+      chainId,
+      isCorrectNetwork,
+      isConnecting,
+      isMock: mockMode,
+      error,
+      connect,
+      disconnect,
+      switchNetwork,
+      signMessage: signMessageFn,
+    }),
+    [
+      wallets,
+      address,
+      displayAddress,
+      chainId,
+      isCorrectNetwork,
+      isConnecting,
+      mockMode,
+      error,
+      connect,
+      disconnect,
+      switchNetwork,
+      signMessageFn,
+    ],
+  );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 };

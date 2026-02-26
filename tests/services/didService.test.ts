@@ -10,11 +10,13 @@ import {
   searchDIDsByRole,
   getDIDMetadata,
   createVerifiablePresentation,
+  verifyDIDOwnership,
   type DIDDocument,
   type DIDMetadata,
   type VerificationMethod,
   type ServiceEndpoint,
 } from '../../src/services/didService';
+import { createSignature, generateKeyPair } from '../../src/services/cryptography';
 
 describe('DID Service', () => {
   beforeEach(() => {
@@ -59,7 +61,7 @@ describe('DID Service', () => {
       const doc = await createDIDDocument(did, { role: 'student' });
 
       expect(doc['@context']).toContain('https://www.w3.org/ns/did/v1');
-      expect(doc['@context']).toContain('https://w3id.org/security/suites/ed25519-2020/v1');
+      expect(doc['@context']).toContain('https://w3id.org/security/suites/jws-2020/v1');
     });
 
     it('should set the document id and controller to the given DID', async () => {
@@ -77,10 +79,10 @@ describe('DID Service', () => {
       expect(doc.verificationMethod).toHaveLength(1);
       const vm: VerificationMethod = doc.verificationMethod[0];
       expect(vm.id).toBe(`${did}#key-1`);
-      expect(vm.type).toBe('EcdsaSecp256k1VerificationKey2019');
+      expect(vm.type).toBe('JsonWebKey2020');
       expect(vm.controller).toBe(did);
-      expect(vm.publicKeyMultibase).toBeDefined();
-      expect(typeof vm.publicKeyMultibase).toBe('string');
+      expect(vm.publicKeyJwk).toBeDefined();
+      expect(vm.publicKeyHex).toMatch(/^0x[0-9a-f]+$/i);
     });
 
     it('should populate authentication and assertionMethod', async () => {
@@ -335,6 +337,54 @@ describe('DID Service', () => {
       expect(students).toHaveLength(2);
       expect(issuers).toHaveLength(1);
       expect(verifiers).toHaveLength(0);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // verifyDIDOwnership
+  // ----------------------------------------------------------------
+  describe('verifyDIDOwnership', () => {
+    it('should verify DID ownership with a JsonWebKey2020 verification method', async () => {
+      const did = await generateDID('ownership-jwk');
+      const keyPair = await generateKeyPair();
+      const now = new Date().toISOString();
+      const didDocument: DIDDocument = {
+        '@context': [
+          'https://www.w3.org/ns/did/v1',
+          'https://w3id.org/security/suites/jws-2020/v1',
+        ],
+        id: did,
+        controller: did,
+        verificationMethod: [
+          {
+            id: `${did}#key-1`,
+            type: 'JsonWebKey2020',
+            controller: did,
+            publicKeyJwk: keyPair.publicKeyJwk,
+            publicKeyHex: keyPair.publicKeyHex,
+          },
+        ],
+        authentication: [`${did}#key-1`],
+        assertionMethod: [`${did}#key-1`],
+        created: now,
+        updated: now,
+      };
+
+      const metadata: DIDMetadata = {
+        did,
+        name: 'ownership-jwk',
+        role: 'student',
+        createdAt: now,
+        lastUpdated: now,
+        verified: false,
+      };
+      await registerDID(didDocument, metadata);
+
+      const challenge = 'proof-of-control';
+      const signature = await createSignature(challenge, keyPair.privateKey);
+
+      await expect(verifyDIDOwnership(did, challenge, signature)).resolves.toBe(true);
+      await expect(verifyDIDOwnership(did, `${challenge}-tampered`, signature)).resolves.toBe(false);
     });
   });
 

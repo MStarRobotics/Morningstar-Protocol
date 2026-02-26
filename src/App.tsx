@@ -1,8 +1,9 @@
-import React, { useState, Suspense, lazy } from 'react';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import { WalletProvider } from './services/WalletContext';
 import { Role } from './types';
+import { authService } from './services/authService';
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded page components – each page is code-split into its own chunk
@@ -89,15 +90,102 @@ const LoadingFallback: React.FC = () => (
 // App
 // ---------------------------------------------------------------------------
 
-const App: React.FC = () => {
+interface AppProps {
+  initialConnectionPanelOpen?: boolean;
+}
+
+const App: React.FC<AppProps> = ({ initialConnectionPanelOpen = false }) => {
   const [currentRole, setCurrentRole] = useState<Role>('guest');
   const [isSystemPaused, setSystemPaused] = useState(false);
+  const [shouldOpenConnectionPanelOnGuestView, setShouldOpenConnectionPanelOnGuestView] = useState(
+    initialConnectionPanelOpen,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreSessionRole = async () => {
+      try {
+        const session = await authService.getSessionMe();
+        if (!cancelled && session?.role && session.role !== 'guest') {
+          setCurrentRole(session.role);
+        }
+      } catch {
+        // Treat as guest when auth session cannot be restored.
+      }
+    };
+
+    void restoreSessionRole();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentRole === 'guest') return;
+
+    let cancelled = false;
+    const verifyAuthorizedRole = async () => {
+      try {
+        const session = await authService.getSessionMe();
+        if (!cancelled && (!session || session.role !== currentRole)) {
+          setCurrentRole('guest');
+        }
+      } catch {
+        if (!cancelled) {
+          setCurrentRole('guest');
+        }
+      }
+    };
+
+    void verifyAuthorizedRole();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRole]);
+
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    };
+    const constrainedConnection = Boolean(
+      nav.connection?.saveData ||
+      (typeof nav.connection?.effectiveType === 'string' && nav.connection.effectiveType.includes('2g'))
+    );
+    const reducedEffects = document.documentElement.classList.contains('reduced-effects');
+    if (constrainedConnection || reducedEffects) {
+      return undefined;
+    }
+
+    const preloadPages = () => {
+      void import('./pages/StudentWallet');
+      void import('./pages/UniversityDashboard');
+      void import('./pages/VerifierPortal');
+      void import('./pages/GovernancePanel');
+    };
+
+    const maybeWindow = window as Window & {
+      requestIdleCallback?: (cb: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    if (
+      typeof maybeWindow.requestIdleCallback === 'function' &&
+      typeof maybeWindow.cancelIdleCallback === 'function'
+    ) {
+      const idleId = maybeWindow.requestIdleCallback(preloadPages, { timeout: 2_000 });
+      return () => maybeWindow.cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preloadPages, 800);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, []);
 
   const handleLogin = (role: Role) => {
     setCurrentRole(role);
   };
 
   const handleLogout = () => {
+    authService.clearSession();
     setCurrentRole('guest');
   };
 
@@ -117,7 +205,13 @@ const App: React.FC = () => {
           />
         );
       default:
-        return <LandingPage onLogin={handleLogin} />;
+        return (
+          <LandingPage
+            onLogin={handleLogin}
+            openConnectionPanelOnMount={shouldOpenConnectionPanelOnGuestView}
+            onInitialConnectionPanelHandled={() => setShouldOpenConnectionPanelOnGuestView(false)}
+          />
+        );
     }
   };
 

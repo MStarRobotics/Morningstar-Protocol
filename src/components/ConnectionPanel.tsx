@@ -124,7 +124,7 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ isOpen, onClos
             </button>
 
             <button
-              onClick={() => open({ view: 'Connect' })} // Trigger generic connect, usually email input is there
+              onClick={() => open({ view: 'Connect' })}
               className="w-full group relative px-6 py-4 bg-[#001a05] border border-[#00ff41]/50 hover:border-[#00ff41] transition-all duration-300 text-left"
             >
               <div className="flex items-center gap-4">
@@ -133,10 +133,10 @@ export const ConnectionPanel: React.FC<ConnectionPanelProps> = ({ isOpen, onClos
                 </div>
                 <div>
                   <div className="text-[#00ff41] font-mono font-bold text-lg">
-                    EMAIL_LINK_ACCESS
+                    STUDENT_EMAIL_VERIFY
                   </div>
                   <div className="text-[#00ff41]/60 text-xs font-mono">
-                    Supports Disposable & Standard Relays
+                    Institutional domains only, OTP handled server-side
                   </div>
                 </div>
               </div>

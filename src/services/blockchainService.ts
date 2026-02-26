@@ -27,7 +27,7 @@ import { serialNumberService } from './serialNumberService';
 import { emailService } from './emailService';
 import { merkleTreeService } from './merkleTreeService';
 import { performanceMonitor } from './performanceMonitor';
-import { env } from './env';
+import { api, env } from './env';
 
 const persistenceWarnings = new Set<string>();
 
@@ -171,8 +171,7 @@ export class PublicBlockchain {
 
     // Persist to backend
     try {
-      const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
-      await fetch(`${apiBase}/api/blockchain/transaction`, {
+      await fetch(api.url('/api/blockchain/transaction'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction }),
@@ -224,8 +223,7 @@ export class PublicBlockchain {
 
     // Persist mined block to backend
     try {
-      const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
-      await fetch(`${apiBase}/api/blockchain/block`, {
+      await fetch(api.url('/api/blockchain/block'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ validator: validatorAddress }),
@@ -388,8 +386,7 @@ export class PrivateBlockchain {
 
       // Persist to backend
       try {
-        const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
-        await fetch(`${apiBase}/api/blockchain/private/store`, {
+        await fetch(api.url('/api/blockchain/private/store'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

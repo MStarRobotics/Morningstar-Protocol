@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Role } from '../types';
 import { getNetworkStats } from '../services/mockBlockchain';
 import { useWallet } from '../services/WalletContext';
+import { authService, AuthServiceError } from '../services/authService';
+import { env } from '../services/env';
 import {
-  Loader2,
   ShieldCheck,
   CheckCircle,
   ScanLine,
@@ -15,12 +16,19 @@ import { Button } from '../components/UI';
 import { logger } from '../services/logger';
 import { ExecuteNode } from '../components/ExecuteNode';
 import { ConnectionPanel } from '../components/ConnectionPanel';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 
 interface Props {
   onLogin: (role: Role) => void;
+  openConnectionPanelOnMount?: boolean;
+  onInitialConnectionPanelHandled?: () => void;
 }
 
-const LandingPage: React.FC<Props> = ({ onLogin }) => {
+const LandingPage: React.FC<Props> = ({
+  onLogin,
+  openConnectionPanelOnMount = false,
+  onInitialConnectionPanelHandled,
+}) => {
   const wallet = useWallet();
   const [stats, setStats] = useState({
     verifiedCredentials: '...',
@@ -40,6 +48,20 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
   const [verificationLogs, setVerificationLogs] = useState<string[]>([]);
   const [particles, setParticles] = useState<{ top: string; left: string; delay: string }[]>([]);
   const [isConnectionPanelOpen, setIsConnectionPanelOpen] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [captchaWidgetKey, setCaptchaWidgetKey] = useState(0);
+  const turnstileEnabled = Boolean(env.turnstileSiteKey.trim());
+
+  useEffect(() => {
+    if (!openConnectionPanelOnMount) {
+      return;
+    }
+
+    setIsConnectionPanelOpen(true);
+    onInitialConnectionPanelHandled?.();
+  }, [openConnectionPanelOnMount, onInitialConnectionPanelHandled]);
 
   useEffect(() => {
     getNetworkStats()
@@ -49,8 +71,11 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
         setStats({ verifiedCredentials: '...', issuers: '...', transactions: '...' });
       });
 
+    const reducedEffects = document.documentElement.classList.contains('reduced-effects');
+    const particleCount = reducedEffects ? 12 : 30;
+
     // Generate static particles
-    const p = Array.from({ length: 30 }).map(() => ({
+    const p = Array.from({ length: particleCount }).map(() => ({
       top: `${Math.random() * 100}%`,
       left: `${Math.random() * 100}%`,
       delay: `${Math.random() * 5}s`,
@@ -60,6 +85,12 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
 
   // Mouse parallax for landing cards
   useEffect(() => {
+    const reducedEffects = document.documentElement.classList.contains('reduced-effects');
+    const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+    if (reducedEffects || coarsePointer) {
+      return undefined;
+    }
+
     const onMove = (e: MouseEvent) => {
       const cards = document.querySelectorAll<HTMLElement>('.landing-card');
       if (cards.length === 0) return;
@@ -84,18 +115,190 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
     };
   }, []);
 
-  const handleConnect = async (walletName?: string) => {
-    // If specific wallet (e.g. from list), we might want to pass that, but Reown handles it differently.
-    // For now, let's open our custom panel which triggers Reown.
+  const handleConnect = () => {
     setIsConnectionPanelOpen(true);
   };
 
+  const refreshCaptcha = () => {
+    if (!turnstileEnabled) return;
+    setCaptchaToken('');
+    setCaptchaWidgetKey((prev) => prev + 1);
+  };
+
+  useEffect(() => {
+    if (!wallet.address) {
+      setAuthStatus('');
+      setCaptchaToken('');
+      return;
+    }
+
+    const walletAddress = wallet.address.toLowerCase();
+    const existingWallet = authService.getBoundWalletAddress().toLowerCase();
+    const hasActiveToken = Boolean(authService.getAccessToken());
+    if (existingWallet === walletAddress && hasActiveToken) {
+      setAuthStatus('Wallet ownership confirmed.');
+      return;
+    }
+
+    if (turnstileEnabled && !captchaToken) {
+      setAuthStatus('Complete CAPTCHA challenge to continue.');
+      return;
+    }
+
+    let cancelled = false;
+    const bootstrapWalletSession = async () => {
+      setAuthBusy(true);
+      setAuthStatus('Binding wallet signature to server session...');
+      try {
+        await authService.bootstrapWalletSession(
+          wallet.address as string,
+          wallet.signMessage,
+          turnstileEnabled ? captchaToken : undefined,
+        );
+        if (!cancelled) {
+          setAuthStatus('Wallet ownership confirmed.');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Wallet verification failed';
+          setAuthStatus(`Wallet verification failed: ${message}`);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthBusy(false);
+        }
+        if (!cancelled) {
+          refreshCaptcha();
+        }
+      }
+    };
+
+    void bootstrapWalletSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [wallet.address, wallet.signMessage, captchaToken, turnstileEnabled]);
+
+  const completeStudentVerification = async (): Promise<boolean> => {
+    if (turnstileEnabled && !captchaToken) {
+      window.alert('Complete CAPTCHA challenge before starting student verification.');
+      return false;
+    }
+
+    const enteredEmail = window.prompt(
+      'Enter your institutional student email (example: name@university.edu):',
+    );
+    if (!enteredEmail) {
+      return false;
+    }
+
+    const normalizedEmail = enteredEmail.trim().toLowerCase();
+    const start = await authService.startStudentEmailVerification(
+      normalizedEmail,
+      turnstileEnabled ? captchaToken : undefined,
+    );
+    refreshCaptcha();
+    const codePrompt = start.devOtpPreview
+      ? `Enter the 6-digit code sent to ${start.email}. Dev OTP preview: ${start.devOtpPreview}`
+      : `Enter the 6-digit code sent to ${start.email}`;
+    const enteredCode = window.prompt(codePrompt);
+    if (!enteredCode) {
+      return false;
+    }
+
+    await authService.verifyStudentEmail(normalizedEmail, enteredCode.trim());
+    return true;
+  };
+
+  const requestRoleAccess = async (role: Exclude<Role, 'guest'>): Promise<void> => {
+    if (!wallet.address) {
+      return;
+    }
+
+    setAuthBusy(true);
+    try {
+      const needsBootstrap = (
+        authService.getBoundWalletAddress().toLowerCase() !== wallet.address.toLowerCase() ||
+        !authService.getAccessToken()
+      );
+      if (needsBootstrap) {
+        if (turnstileEnabled && !captchaToken) {
+          const message = 'Complete CAPTCHA challenge before requesting role access.';
+          setAuthStatus(message);
+          window.alert(message);
+          return;
+        }
+
+        await authService.bootstrapWalletSession(
+          wallet.address,
+          wallet.signMessage,
+          turnstileEnabled ? captchaToken : undefined,
+        );
+        refreshCaptcha();
+      }
+
+      let response;
+      try {
+        response = await authService.requestRole(role);
+      } catch (error) {
+        if (error instanceof AuthServiceError && error.code === 'STUDENT_VERIFICATION_REQUIRED') {
+          const verified = await completeStudentVerification();
+          if (!verified) return;
+          response = await authService.requestRole(role);
+        } else {
+          throw error;
+        }
+      }
+
+      if (response.status === 'approved') {
+        setAuthStatus(`Role approved: ${role.toUpperCase()}`);
+        if (role === 'issuer') {
+          setShowKybModal(false);
+          setKybStep('form');
+        }
+        onLogin(role);
+        return;
+      }
+
+      const requestLabel = response.requestId ? `Request ID: ${response.requestId}` : 'Request submitted.';
+      setAuthStatus(`Role request pending review. ${requestLabel}`);
+      if (role === 'issuer') {
+        setShowKybModal(false);
+        setKybStep('form');
+      }
+      window.alert(`Role request submitted for ${role.toUpperCase()}. ${requestLabel}`);
+    } catch (error) {
+      if (error instanceof AuthServiceError) {
+        const manualReviewRequestId = (error.details as { manualReviewRequestId?: string } | null)?.manualReviewRequestId;
+        if (error.code === 'STUDENT_DOMAIN_REVIEW_REQUIRED' && manualReviewRequestId) {
+          const message = `Domain not recognized for automatic approval. Manual review request created: ${manualReviewRequestId}`;
+          setAuthStatus(message);
+          window.alert(message);
+          return;
+        }
+        setAuthStatus(`Access request failed: ${error.message}`);
+        window.alert(error.message);
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : 'Unable to complete role request';
+      setAuthStatus(`Access request failed: ${message}`);
+      window.alert(message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
   const handleRoleSelect = (role: Role) => {
+    if (authBusy) return;
     if (role === 'issuer') {
       setShowKybModal(true);
-    } else {
-      onLogin(role);
+      return;
     }
+    if (role === 'guest') {
+      return;
+    }
+    void requestRoleAccess(role);
   };
 
   const runVerificationSimulation = async () => {
@@ -123,6 +326,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
 
   const handleKybSubmit = () => {
     if (!kybData.entityName || !kybData.regId || !kybData.document) return;
+    setVerificationLogs([]);
     runVerificationSimulation();
   };
 
@@ -229,6 +433,28 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
                   </button>
                 </div>
               )}
+              {authStatus && (
+                <div className="mt-2 text-[10px] font-mono text-data/80 border border-data/30 bg-data/10 px-2 py-1 w-fit">
+                  {authStatus}
+                </div>
+              )}
+              {turnstileEnabled && (
+                <div className="mt-3 border border-primary/30 bg-black/40 px-2 py-2 w-fit min-w-[220px]">
+                  <p className="text-[9px] font-mono uppercase tracking-wider text-text-muted mb-2">
+                    Bot Verification
+                  </p>
+                  <TurnstileWidget
+                    key={captchaWidgetKey}
+                    siteKey={env.turnstileSiteKey}
+                    onTokenChange={setCaptchaToken}
+                    theme="dark"
+                    size="compact"
+                  />
+                  <p className="text-[9px] font-mono mt-2 text-data/80">
+                    {captchaToken ? 'CAPTCHA ready' : 'Solve challenge to continue'}
+                  </p>
+                </div>
+              )}
             </div>
             <div className="font-mono text-[10px] text-magenta/60 hidden md:block">
               CORE_SYSTEM_ACTIVE // VER: 4.0.9
@@ -240,7 +466,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
             {roles.map((item, index) => (
               <div
                 key={item.role}
-                className={`landing-card ${index % 2 === 1 ? 'even-card' : ''}`}
+                className={`landing-card ${index % 2 === 1 ? 'even-card' : ''} ${authBusy ? 'pointer-events-none opacity-70' : ''}`}
                 onClick={() => handleRoleSelect(item.role)}
               >
                 {/* Etched decorative line */}
@@ -263,7 +489,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
                   </p>
                 </div>
 
-                <button className="init-btn-landing">
+                <button className="init-btn-landing" disabled={authBusy}>
                   INITIALIZE{' '}
                   <span className="material-symbols-outlined init-arrow">arrow_forward</span>
                 </button>
@@ -379,7 +605,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
                       <Button
                         onClick={handleKybSubmit}
                         className="w-full bg-magenta/20 hover:bg-magenta/30 border-magenta/50 text-magenta"
-                        disabled={!kybData.entityName || !kybData.regId || !kybData.document}
+                        disabled={!kybData.entityName || !kybData.regId || !kybData.document || authBusy}
                       >
                         INITIATE_VERIFICATION_SEQUENCE
                       </Button>
@@ -426,7 +652,11 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
                       </p>
                     </div>
 
-                    <Button onClick={() => onLogin('issuer')} className="w-full max-w-sm mt-4">
+                    <Button
+                      onClick={() => void requestRoleAccess('issuer')}
+                      className="w-full max-w-sm mt-4"
+                      disabled={authBusy}
+                    >
                       ENTER_DASHBOARD
                     </Button>
                   </div>
@@ -512,7 +742,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
                   {wallet.wallets.map((w) => (
                     <button
                       key={w.name}
-                      onClick={() => handleConnect(w.name)}
+                      onClick={handleConnect}
                       disabled={wallet.isConnecting}
                       className="relative group h-14 px-8 flex items-center justify-center obsidian-panel notch-tl border-magenta/50 hover:border-magenta hover:shadow-[0_0_20px_rgba(217,70,239,0.3)] transition-all overflow-hidden"
                     >
@@ -527,7 +757,7 @@ const LandingPage: React.FC<Props> = ({ onLogin }) => {
               ) : (
                 // No wallets detected — show install prompt or mock connect
                 <button
-                  onClick={() => handleConnect()}
+                  onClick={handleConnect}
                   disabled={wallet.isConnecting}
                   className="relative group h-14 px-8 flex items-center justify-center obsidian-panel notch-tl border-magenta/50 hover:border-magenta hover:shadow-[0_0_20px_rgba(217,70,239,0.3)] transition-all overflow-hidden"
                 >

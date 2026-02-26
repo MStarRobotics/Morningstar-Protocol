@@ -20,6 +20,16 @@ function num(key: string, fallback: number): number {
   return Number.isNaN(n) ? fallback : n;
 }
 
+function normalizeBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+}
+
+function buildApiUrl(path: string, apiBase: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return apiBase ? `${apiBase}${normalizedPath}` : normalizedPath;
+}
+
 export const env = {
   isProd: import.meta.env.PROD,
   isDev: import.meta.env.DEV,
@@ -34,7 +44,8 @@ export const env = {
   ipfsProxyUrl: str('VITE_IPFS_PROXY_URL'),
 
   // Backend API proxy (required in production)
-  apiProxyUrl: str('VITE_API_PROXY_URL'),
+  apiProxyUrl: normalizeBaseUrl(str('VITE_API_PROXY_URL')),
+  governanceBearerToken: str('VITE_GOVERNANCE_BEARER_TOKEN'),
 
   // Blockchain
   blockchainNetwork: str('VITE_BLOCKCHAIN_NETWORK', 'polygon-amoy'),
@@ -58,11 +69,12 @@ export const env = {
   ipfsStatusListCid: str('VITE_IPFS_STATUS_LIST_CID'),
 
   // Security
-  mfaEnabled: bool('VITE_MFA_ENABLED'),
-  mfaRequiredFactors: num('VITE_MFA_REQUIRED_FACTORS', 1),
+  mfaEnabled: bool('VITE_MFA_ENABLED', true),
+  mfaRequiredFactors: num('VITE_MFA_REQUIRED_FACTORS', 2),
   mfaSessionTimeout: num('VITE_MFA_SESSION_TIMEOUT', 3600000),
   allowClientSigning: bool('VITE_ALLOW_CLIENT_SIGNING', false),
   strictDidResolution: bool('VITE_STRICT_DID_RESOLUTION', true),
+  turnstileSiteKey: str('VITE_TURNSTILE_SITE_KEY'),
   corsOrigin: str('VITE_CORS_ORIGIN', 'http://localhost:3000'),
 
   // GDPR
@@ -95,4 +107,35 @@ export const env = {
   // Governance
   governanceRegistryUrl: str('VITE_GOVERNANCE_REGISTRY_URL'),
   schemaRegistryUrl: str('VITE_SCHEMA_REGISTRY_URL'),
+} as const;
+
+function resolveApiBaseUrl(): string {
+  if (env.apiProxyUrl) {
+    return env.apiProxyUrl;
+  }
+
+  if (env.isProd) {
+    throw new Error('Missing VITE_API_PROXY_URL in production. Configure backend proxy URL.');
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    const host = window.location.hostname.toLowerCase();
+    // Local dev defaults to backend API on port 3001 when no proxy URL is set.
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return 'http://localhost:3001';
+    }
+
+    if (window.location.origin) {
+      return normalizeBaseUrl(window.location.origin);
+    }
+  }
+
+  return 'http://localhost:3001';
+}
+
+export const api = {
+  get baseUrl(): string {
+    return resolveApiBaseUrl();
+  },
+  url: (path: string): string => buildApiUrl(path, resolveApiBaseUrl()),
 } as const;

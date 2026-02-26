@@ -7,8 +7,27 @@ export interface EmailNotification {
   qrCode?: string;
 }
 
+import { api, env } from './env';
+
 class EmailService {
   private emailQueue: EmailNotification[] = [];
+
+  private isOfflineFallbackError(error: unknown): boolean {
+    if (env.isProd) {
+      return false;
+    }
+
+    if (error instanceof TypeError) {
+      return true;
+    }
+
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const code = (error as { code?: unknown }).code;
+    return typeof code === 'string' && ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'EPERM'].includes(code);
+  }
 
   async sendCredentialIssuedEmail(
     studentEmail: string,
@@ -84,31 +103,46 @@ Morningstar Credentials Team
   }
 
   private async sendEmail(email: EmailNotification): Promise<void> {
-    const apiBase = (import.meta as any).env?.VITE_API_PROXY_URL || 'http://localhost:3001';
-
+    let response: Response;
     try {
-      const response = await fetch(`${apiBase}/api/email/notify`, {
+      response = await fetch(api.url('/api/email/notify'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(email),
       });
-
-      if (!response.ok) {
-        throw new Error(`Email API failed with status: ${response.status}`);
+    } catch (error) {
+      if (!this.isOfflineFallbackError(error)) {
+        throw error;
       }
 
-      console.log('📧 Email sent via backend:', email.to);
-    } catch (error) {
-      // Fallback for demo/dev if backend is offline or fails
+      // Fallback for demo/dev only when backend is unreachable.
       console.warn('📧 (Fallback) Email sent locally:', {
         to: email.to,
         subject: email.subject,
         credentialId: email.credentialId,
       });
+      this.emailQueue.push(email);
+      return;
     }
 
+    if (!response.ok) {
+      let details = `status=${response.status}`;
+      try {
+        const payload = await response.json();
+        const code = payload?.details?.code;
+        const message = payload?.error;
+        if (code || message) {
+          details = [code, message].filter(Boolean).join(': ');
+        }
+      } catch {
+        // Keep status-only details when response body is not JSON.
+      }
+      throw new Error(`Email API rejected request (${details})`);
+    }
+
+    console.log('📧 Email sent via backend:', email.to);
     this.emailQueue.push(email);
   }
 

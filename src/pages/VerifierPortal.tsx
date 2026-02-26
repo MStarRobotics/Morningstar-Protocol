@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import { FileSearch, Activity, CheckCircle, ShieldCheck, FileText, Building, UserCheck, BrainCircuit } from 'lucide-react';
 import { Card, Button, GlitchText } from '../components/UI';
 import { analyzeVerificationTrust } from '../services/geminiService';
-import { jsPDF } from "jspdf";
 import { verifyCredentialFull, VerifiableCredential, VerificationResult } from '../services/verificationPipeline';
 
 const VerifierPortal: React.FC = () => {
@@ -142,30 +141,41 @@ const VerifierPortal: React.FC = () => {
    };
 
   const handleDownloadReport = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("Morningstar Verification Report", 14, 22);
-    doc.setFontSize(11);
-    let y = 40;
-    doc.text(`Candidate: ${credentialDetails.candidate}`, 14, y); y += 8;
-    doc.text(`Issuer: ${credentialDetails.issuer}`, 14, y); y += 8;
-    doc.text(`Credential: ${credentialDetails.credential}`, 14, y); y += 8;
-    doc.text(`Issued: ${credentialDetails.issued}`, 14, y); y += 8;
-    doc.text(`Trust Score: ${credentialDetails.trustScore.toFixed(1)}%`, 14, y); y += 12;
+    const lines = [
+      'Morningstar Verification Report',
+      `Generated: ${new Date().toISOString()}`,
+      '',
+      `Candidate: ${credentialDetails.candidate}`,
+      `Issuer: ${credentialDetails.issuer}`,
+      `Credential: ${credentialDetails.credential}`,
+      `Issued: ${credentialDetails.issued}`,
+      `Trust Score: ${credentialDetails.trustScore.toFixed(1)}%`,
+      '',
+    ];
+
     if (verificationResult) {
-      doc.text("Verification Checks:", 14, y); y += 8;
+      lines.push('Verification Checks:');
       for (const check of verificationResult.checks) {
-        doc.text(`  [${check.status.toUpperCase()}] ${check.name}: ${check.detail}`, 14, y);
-        y += 7;
+        lines.push(`- [${check.status.toUpperCase()}] ${check.name}: ${check.detail}`);
       }
-      y += 5;
+      lines.push('');
     }
+
     if (trustReport) {
-      doc.text("AI Analysis:", 14, y); y += 8;
-      const lines = doc.splitTextToSize(trustReport, 180);
-      doc.text(lines, 14, y);
+      lines.push('AI Analysis:');
+      lines.push(trustReport);
+      lines.push('');
     }
-    doc.save("verification-report.pdf");
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'verification-report.txt';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (

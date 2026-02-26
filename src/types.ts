@@ -40,11 +40,13 @@ export interface SchemaTemplate {
 }
 
 export interface Institution {
+  id: string;
   address: string;
   name: string;
   role: 'ISSUER_ROLE' | 'NONE';
   kycStatus: 'verified' | 'pending' | 'rejected';
   addedDate: string;
+  updatedAt?: string;
 }
 
 export const MOCK_DID = "did:polygon:0x123...abc";

@@ -4,11 +4,14 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig(({ mode }) => {
   const isProd = mode === 'production';
+  const devHost = process.env.VITE_DEV_HOST || '0.0.0.0';
+  const parsedDevPort = Number.parseInt(String(process.env.VITE_DEV_PORT ?? ''), 10);
+  const devPort = Number.isFinite(parsedDevPort) ? parsedDevPort : 3000;
 
   return {
     server: {
-      port: 3000,
-      host: '0.0.0.0',
+      port: devPort,
+      host: devHost,
     },
 
     plugins: [
@@ -76,6 +79,16 @@ export default defineConfig(({ mode }) => {
     },
 
     build: {
+      target: ['es2020', 'chrome110', 'safari15', 'firefox110'],
+      cssTarget: ['chrome110', 'safari15', 'firefox110'],
+      modulePreload: {
+        polyfill: true,
+        resolveDependencies: (_filename, deps) =>
+          deps.filter(
+            (dep) => !/(reown|walletconnect|wagmi|viem-core|veramo|vc-engine|qrcode|recharts)/.test(dep),
+          ),
+      },
+
       // Generate source maps so production errors can be traced back to
       // original source files (hidden = maps are not referenced in the
       // bundle itself, keeping them out of browser DevTools for end users).
@@ -108,6 +121,20 @@ export default defineConfig(({ mode }) => {
               id.includes('node_modules/d3-')
             ) {
               return 'recharts';
+            }
+
+            // Wallet stack modules, split by provider to keep chunk sizes manageable
+            if (id.includes('node_modules/@walletconnect')) {
+              return 'walletconnect';
+            }
+            if (id.includes('node_modules/@reown')) {
+              return 'reown';
+            }
+            if (id.includes('node_modules/wagmi')) {
+              return 'wagmi';
+            }
+            if (id.includes('node_modules/viem')) {
+              return 'viem-core';
             }
 
             // QR-code generation (only needed on credential views)

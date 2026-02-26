@@ -15,6 +15,15 @@
 
 Morningstar Credentials is an **industrial-grade blockchain platform** for issuing, managing, and verifying academic credentials with **absolute security** and **privacy-preserving features**. This system implements cutting-edge research from leading academic papers on blockchain-based credential verification.
 
+## Latest Workspace Updates (February 26, 2026)
+
+- Added production-style server auth flows: wallet challenge binding, refresh tokens, role request/approval workflow, and session introspection endpoints.
+- Added institutional student verification hardening: OTP with attempt limits, disposable-domain controls, and manual-review path for unknown domains.
+- Added optional Cloudflare Turnstile protection for wallet bootstrap and student verification flows.
+- Hardened backend mutating routes with role-scoped bearer token middleware and clearer operational health endpoints.
+- Updated local API base URL resolution to prevent frontend `404` errors by defaulting localhost dev API calls to `http://localhost:3001`.
+- Expanded quality scripts (`audit:all`, `build:check-warnings`) and validated latest workspace status against current tests/build/typecheck.
+
 ### Why Morningstar Credentials?
 
 - **🔐 Military-Grade Security**: Zero-Knowledge Proofs (zk-SNARKs) ensure verification without exposing sensitive data
@@ -65,17 +74,18 @@ Morningstar Credentials is an **industrial-grade blockchain platform** for issui
 - AES-256-GCM for data encryption
 - Merkle trees for batch verification
 
-#### 6. **Multi-Factor Authentication & Social Login**
+#### 6. **Wallet Auth, Student Verification, and Bot Defense**
 
-- **Reown AppKit Integration**: Seamless wallet connection & management
-- **Social Login**: Google, X, Discord, GitHub support
-- **Email Login**: Magic link authentication (supports disposable emails)
-- TOTP (Time-based One-Time Password) backup
+- **Reown AppKit Integration**: Wallet connection and account management
+- **Wallet Ownership Binding**: Server-side challenge + signature verification
+- **Institutional Email Verification**: Server-side OTP flow with disposable-domain blocking
+- **Turnstile CAPTCHA**: Optional in development, enforceable in production
 
 #### 7. **Smart Contract Layer**
 
 - Solidity-compatible contract simulation
 - Role-based access control (RBAC)
+- Governance institution registry controls (`ADD_ENTITY`, `EDIT`) with persistent backend writes
 - Credential lifecycle management
 - Event-driven architecture
 
@@ -218,13 +228,23 @@ cd ..
 
 # Set up environment variables
 cp .env.example .env.local
+
+# Configure frontend governance write token (must match backend governance/admin token)
+# .env.local:
+# VITE_GOVERNANCE_BEARER_TOKEN=<shared-governance-token>
+
+# Configure backend environment
+cp backend/.env.example backend/.env
+# backend/.env:
+# API_AUTH_MODE=required
+# API_GOVERNANCE_TOKEN=<shared-governance-token>
 ```
 
 ### Development Mode
 
 You need to run both the frontend and the backend server.
 
-1. **Start the Backend** (Required for DID/Blockchain persistence):
+1. **Start the Backend** (Required for DID/Blockchain/Governance persistence):
 
    ```bash
    cd backend
@@ -235,8 +255,30 @@ You need to run both the frontend and the backend server.
 
    ```bash
    npm run dev
-   # Application runs at http://localhost:3000
+   # Application runs at http://localhost:3000 (or next available port)
    ```
+
+3. **Confirm frontend API routing**:
+
+   ```bash
+   # .env.local (recommended explicit setting)
+   VITE_API_PROXY_URL=http://localhost:3001
+   ```
+
+By default, localhost development now falls back to `http://localhost:3001` when `VITE_API_PROXY_URL` is empty.
+
+If you see browser popups like `Request failed (404)`, the frontend is usually calling `http://localhost:3000/api/...` instead of the backend. Ensure backend is running and `VITE_API_PROXY_URL` points to port `3001`.
+
+If your environment disallows binding to `0.0.0.0`, bind explicitly to loopback:
+
+```bash
+cd backend
+HOST=127.0.0.1 npm start
+```
+
+```bash
+VITE_DEV_HOST=127.0.0.1 npm run dev
+```
 
 ### Verification Scripts
 
@@ -248,9 +290,13 @@ node scripts/test-crypto.js
 
 # Verify Backend Blockchain & Email APIs
 # (Ensure backend is running on port 3001)
-node scripts/verify-blockchain.js
+# Optional: EMAIL_EXPECTED_MODE=auto|mock|smtp
+# Optional when API_AUTH_MODE=required: API_AUTH_TOKEN=<issuer|governance|admin token>
+# Recommended for SMTP readiness checks:
+EMAIL_EXPECTED_MODE=smtp node scripts/verify-blockchain.js
 
 # Verify DID Registry
+# Optional when API_AUTH_MODE=required: API_AUTH_TOKEN=<issuer|governance|admin token>
 node scripts/verify-did.js
 ```
 
@@ -266,7 +312,7 @@ npm run preview
 
 ## Command Reference (Verified)
 
-Verified on **February 23, 2026**.
+Verified on **February 26, 2026**.
 
 Long-running commands (`dev`, `preview`, backend server commands, and `test:watch`) were checked by confirming startup output, then stopping after a short timeout.
 
@@ -274,14 +320,17 @@ Long-running commands (`dev`, `preview`, backend server commands, and `test:watc
 
 | Command | What it does | Status | Notes |
 | ------- | ------------ | ------ | ----- |
-| `npm run dev` | Starts Vite development server | PASS | Server started at `http://localhost:3000/` |
+| `npm run dev` | Starts Vite development server | PASS | Starts on `http://localhost:3000/` by default (uses next open port if occupied) |
 | `npm run build` | Creates production build in `dist/` | PASS | Build completed successfully |
 | `npm run preview` | Serves production build locally | PASS | Server started at `http://localhost:4173/` |
-| `npm run test` | Runs Vitest test suite once | FAIL | 12 tests failed in `tests/services/didService.test.ts` |
-| `npm run test:watch` | Runs Vitest in watch mode | PARTIAL | Watch mode starts, but test suite currently has failing tests |
-| `npm run test:coverage` | Runs tests with coverage | FAIL | Missing dependency: `@vitest/coverage-v8` |
-| `npm run typecheck` | Runs TypeScript checks | FAIL | Type errors in source and tests |
-| `npm run lint` | Alias for `tsc --noEmit` | FAIL | Same TypeScript errors as `typecheck` |
+| `npm run test` | Runs Vitest test suite once | PASS | `352/352` tests passing |
+| `npm run test:watch` | Runs Vitest in watch mode | PASS | Watch mode starts and tests execute; command is long-running by design |
+| `npm run test:coverage` | Runs tests with coverage | PASS | Local fallback if provider is missing |
+| `npm run test:coverage:strict` | Runs tests with mandatory coverage provider | PASS | Requires lockfile-managed `@vitest/coverage-v8`; exits non-zero if removed |
+| `npm run typecheck` | Runs TypeScript checks | PASS | `tsc --noEmit` completed successfully |
+| `npm run lint` | Alias for `tsc --noEmit` | PASS | Same successful result as `typecheck` |
+| `npm run audit:all` | Runs repository security audit checks | PASS | Executes `scripts/security-audit.mjs` |
+| `npm run build:check-warnings` | Builds and validates warning thresholds | PASS | Executes `scripts/check-build-warnings.mjs` |
 | `npm run postinstall` | Runs post-install setup script | PASS | `node scripts/postinstall.mjs` executed successfully |
 
 ### Backend Commands (`backend/package.json`)
@@ -289,7 +338,7 @@ Long-running commands (`dev`, `preview`, backend server commands, and `test:watc
 | Command | What it does | Status | Notes |
 | ------- | ------------ | ------ | ----- |
 | `cd backend && npm start` | Starts backend API server | PASS | API started on port `3001` |
-| `cd backend && npm run dev` | Starts backend in watch mode | PASS | Watch mode started and API served on port `3001` |
+| `cd backend && npm run dev` | Starts backend in watch mode | PARTIAL | Can fail with `EMFILE: too many open files, watch` on systems with low watcher limits; use `npm start` as fallback |
 
 ### Verification Scripts (`scripts/`)
 
@@ -297,7 +346,7 @@ Long-running commands (`dev`, `preview`, backend server commands, and `test:watc
 | ------- | ------------ | ------ | ----- |
 | `node scripts/test-crypto.js` | Verifies Base58 and BigInt crypto logic | PASS | All tests passed |
 | `node scripts/verify-did.js` | Verifies DID backend endpoints | PASS | Health, register, resolve, update, revoke all passed |
-| `node scripts/verify-blockchain.js` | Verifies blockchain/email endpoints | FAIL | Uses `require(...)` in ESM project (`require is not defined`) |
+| `node scripts/verify-blockchain.js` | Verifies blockchain/email endpoints | PASS | Uses `/api/email/health` + `/api/email/notify`; set `EMAIL_EXPECTED_MODE=smtp` to fail fast on SMTP misconfiguration |
 
 ## Add a New Command (Template)
 
@@ -313,17 +362,74 @@ Example:
 | `npm run my:task` | Generates internal reports | NOT VERIFIED | Reads `./data`, writes `./reports`; requires `.env.local` |
 ```
 
+## CI Coverage Artifacts
+
+- GitHub Actions now runs a dedicated `coverage` job.
+- `@vitest/coverage-v8` is pinned in `devDependencies` and installed via `npm ci`.
+- Coverage runs in strict mode via `npm run test:coverage:strict`.
+- The generated `coverage/` directory is uploaded as the `coverage-report` artifact.
+
+## Backend Email Transport (SendGrid Defaults)
+
+- Backend email mode is controlled by `EMAIL_TRANSPORT_MODE`:
+  - `auto`: use SMTP when fully configured, otherwise mock
+  - `smtp`: require SMTP; missing/invalid config is an error
+  - `mock`: always mock (no provider calls)
+- For production delivery checks, set `EMAIL_TRANSPORT_MODE=smtp`.
+- `SMTP_PROVIDER=sendgrid` enables these defaults:
+  - `SMTP_HOST=smtp.sendgrid.net`
+  - `SMTP_PORT=587`
+  - `SMTP_SECURE=false`
+  - `SMTP_USER=apikey`
+- Required to send real email:
+  - `SMTP_PASSWORD` (SendGrid API key)
+  - `SMTP_FROM` (verified sender)
+- Validation command (backend running): `EMAIL_EXPECTED_MODE=smtp node scripts/verify-blockchain.js`
+- New endpoint: `GET /api/email/health` reports effective mode/config.
+- In production, `/api/email/health` redacts sensitive SMTP details unless `EXPOSE_EMAIL_HEALTH_DETAILS=true` (or admin token is supplied).
+- Error codes from email endpoints:
+  - `EMAIL_NOT_CONFIGURED`
+  - `EMAIL_PROVIDER_AUTH_FAILED`
+  - `EMAIL_SEND_FAILED`
+
+## Backend Write-Route Authorization
+
+- Mutating endpoints are protected when `API_AUTH_MODE=required`:
+  - `/api/did` (`POST`, `PUT`, `DELETE`)
+  - `/api/governance/institutions` (`POST`, `PATCH`)
+  - `/api/blockchain/transaction`
+  - `/api/blockchain/block`
+  - `/api/blockchain/private/store`
+  - `/api/email/notify`
+  - `/api/mfa/send-otp`
+- Configure bearer tokens:
+  - `API_ISSUER_TOKEN`
+  - `API_GOVERNANCE_TOKEN`
+  - `API_ADMIN_TOKEN` (bypasses role checks on protected routes)
+- Frontend governance RBAC writes require:
+  - `VITE_GOVERNANCE_BEARER_TOKEN` in `.env.local`
+  - value must match `API_GOVERNANCE_TOKEN` or `API_ADMIN_TOKEN` in `backend/.env`
+- Verification scripts support `API_AUTH_TOKEN=<token>`.
+
+### Email Troubleshooting
+
+| Error code | Typical cause | Fix |
+| ---------- | ------------- | --- |
+| `EMAIL_NOT_CONFIGURED` | Missing SMTP env values or `EMAIL_TRANSPORT_MODE=smtp` without full config | Set `SMTP_PROVIDER`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` |
+| `EMAIL_PROVIDER_AUTH_FAILED` | Invalid SendGrid API key or wrong SMTP username | Set `SMTP_USER=apikey` and rotate `SMTP_PASSWORD` with a valid SendGrid API key |
+| `EMAIL_SEND_FAILED` | Provider/network rejection not classified as auth | Check provider status, sender identity verification, and backend network egress |
+
 ---
 
 ## Technology Stack
 
-- **React 19.2.4** + **TypeScript 5.8.2** + **Vite 6.2.0**
+- **React 19.2.4** + **TypeScript 5.8.2** + **Vite 6.x**
 - **Blockchain Simulation** - Dual-chain architecture
 - **Cryptography** - Web Crypto API (SHA-256, ECDSA, AES-GCM)
 - **Zero-Knowledge Proofs** - zk-SNARK simulation
 - **IPFS** - Decentralized storage
 - **Smart Contracts** - Solidity-compatible layer
-- **Reown AppKit** - Production-grade Wallet & Social Login
+- **Reown AppKit** - WalletConnect UX with optional social providers
 - **Google Gemini 3 Flash** - AI schema generation
 
 ---
@@ -334,30 +440,97 @@ Example:
 
 ```typescript
 import { blockchainManager } from './services/blockchainService';
-import { zkProof } from './services/zkProof';
-import { didService } from './services/didService';
+import type { Credential } from './types';
 
 // Issue a new credential
-const credential = {
-  studentId: 'STU123456',
-  degree: 'Bachelor of Science',
-  major: 'Computer Science',
-  gpa: 3.85,
-  graduationYear: 2024,
+const credential: Credential = {
+  id: 'cred-001',
+  type: 'AcademicCredential',
+  issuer: 'did:web:polygon.university',
+  issuanceDate: new Date().toISOString(),
+  recipient: 'did:key:z6MkHolder123',
+  status: 'active',
+  data: {
+    degree: 'Bachelor of Science',
+    major: 'Computer Science',
+    graduationYear: '2026',
+  },
+  hiddenData: {
+    gpa: '3.85',
+  },
 };
 
-const zkProof = await zkProof.generateZKProof(credential);
-const did = didService.generateDID('student', credential.studentId);
-const txHash = await blockchainManager.issueCredential(credential, zkProof, did);
+const result = await blockchainManager.issueCredential(
+  credential,
+  'did:web:polygon.university',
+  'did:key:z6MkHolder123',
+  'student@university.edu',
+  'Student Name',
+);
+
+console.log(result.publicTx.id, result.serialNumber, result.qrCode);
 ```
 
-### Credential Verification
+### Blockchain Integrity Verification
 
 ```typescript
-// Verify a credential
-const isValid = await blockchainManager.verifyCredential(credentialHash, zkProof, did);
+const isChainValid = await blockchainManager.publicChain.verifyChain();
+console.log(`Public chain valid: ${isChainValid}`);
+```
 
-console.log(`Credential valid: ${isValid}`);
+### User Auth & Governance Access API
+
+```bash
+# Start auth session (optional captchaToken when Turnstile is enabled)
+curl -X POST http://localhost:3001/api/auth/session/start \
+  -H "Content-Type: application/json" \
+  -d '{"walletAddress":"0xabc...","captchaToken":"<turnstile-token>"}'
+
+# Bind wallet signature to session
+curl -X POST http://localhost:3001/api/auth/session/bind-wallet \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":"<session-id>","walletAddress":"0xabc...","signature":"<wallet-signature>"}'
+
+# Start student email verification (requires user access token)
+curl -X POST http://localhost:3001/api/auth/student/email/start \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"name@university.edu","captchaToken":"<turnstile-token>"}'
+
+# Submit role request (requires user access token)
+curl -X POST http://localhost:3001/api/auth/role/request \
+  -H "Authorization: Bearer <access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"role":"governance"}'
+
+# Governance/admin: list pending and historical role requests
+curl http://localhost:3001/api/auth/role/requests \
+  -H "Authorization: Bearer <governance-token>"
+
+# Governance/admin: approve or deny role request
+curl -X POST http://localhost:3001/api/auth/role/approve \
+  -H "Authorization: Bearer <governance-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"requestId":"<request-id>","approve":true,"reviewNote":"approved"}'
+```
+
+### Governance Institution Registry API
+
+```bash
+# List institutions
+curl http://localhost:3001/api/governance/institutions
+
+# Add institution (governance/admin bearer token required)
+curl -X POST http://localhost:3001/api/governance/institutions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <governance-token>" \
+  -d '{"name":"Example University","address":"0xExample...1","role":"ISSUER_ROLE","kycStatus":"pending"}'
+
+# Update role/KYC only (governance/admin bearer token required)
+curl -X PATCH http://localhost:3001/api/governance/institutions/<institution-id> \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <governance-token>" \
+  -d '{"role":"NONE","kycStatus":"rejected"}'
 ```
 
 ---
@@ -374,6 +547,7 @@ console.log(`Credential valid: ${isValid}`);
 8. **Monitor logs** - Use Sentry/DataDog for error tracking
 9. **Rate limiting** - Protect against DDoS attacks
 10. **Input validation** - Sanitize all user inputs
+11. **Enforce Turnstile in production** - Set `TURNSTILE_REQUIRED=true` and `TURNSTILE_SECRET_KEY` on backend, plus `VITE_TURNSTILE_SITE_KEY` on frontend
 
 ---
 

@@ -1,12 +1,28 @@
 /**
  * Verification script for DID Backend API
  * Usage: node scripts/verify-did.js
+ * Optional:
+ *   API_URL=http://localhost:3001
+ *   API_AUTH_TOKEN=<bearer_token_for_protected_write_endpoints>
  */
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = process.env.API_URL || 'http://localhost:3001';
+const API_AUTH_TOKEN = String(process.env.API_AUTH_TOKEN || '').trim();
+
+function authHeaders(headers = {}) {
+  if (!API_AUTH_TOKEN) return headers;
+  return {
+    ...headers,
+    Authorization: `Bearer ${API_AUTH_TOKEN}`,
+  };
+}
 
 async function test() {
   console.log('--- Testing DID Backend API ---');
+  console.log(`API_URL=${API_BASE}`);
+  if (API_AUTH_TOKEN) {
+    console.log('API_AUTH_TOKEN=provided');
+  }
 
   // 1. Health check
   try {
@@ -25,7 +41,7 @@ async function test() {
   console.log(`Registering ${didId}...`);
   const regRes = await fetch(`${API_BASE}/api/did`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ didDocument: doc, metadata })
   });
   
@@ -61,7 +77,7 @@ async function test() {
   console.log(`Updating ${didId}...`);
   const updateRes = await fetch(`${API_BASE}/api/did/${didId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ metadata: { role: 'admin' } })
   });
 
@@ -82,7 +98,8 @@ async function test() {
   // 7. Revoke DID
   console.log(`Revoking ${didId}...`);
   const revokeRes = await fetch(`${API_BASE}/api/did/${didId}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    headers: authHeaders(),
   });
 
   if (revokeRes.ok) {

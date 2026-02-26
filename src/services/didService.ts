@@ -11,7 +11,7 @@
 
 import { sha256, generateKeyPair, verifySignature } from './cryptography';
 import { createVeramoDID, resolveVeramoDID, type VeramoDIDResult } from './veramoAgent';
-import { env } from './env';
+import { api, env } from './env';
 import { logger } from './logger';
 
 export interface DIDDocument {
@@ -55,7 +55,6 @@ export interface DIDMetadata {
   verified: boolean;
 }
 
-const API_BASE = env.apiProxyUrl || 'http://localhost:3001';
 const DID_INDEX_KEY = 'did_index';
 const didRegistryKey = (did: string): string => `did_registry_${did}`;
 const didMetadataKey = (did: string): string => `did_metadata_${did}`;
@@ -309,16 +308,17 @@ export async function createDIDDocument(
   const didDocument: DIDDocument = {
     '@context': [
       'https://www.w3.org/ns/did/v1',
-      'https://w3id.org/security/suites/ed25519-2020/v1',
+      'https://w3id.org/security/suites/jws-2020/v1',
     ],
     id: did,
     controller: did,
     verificationMethod: [
       {
         id: verificationMethodId,
-        type: 'EcdsaSecp256k1VerificationKey2019',
+        type: 'JsonWebKey2020',
         controller: did,
-        publicKeyMultibase: keyPair.publicKeyHex,
+        publicKeyJwk: keyPair.publicKeyJwk,
+        publicKeyHex: keyPair.publicKeyHex,
       },
     ],
     authentication: [verificationMethodId],
@@ -350,7 +350,7 @@ export async function createDIDDocument(
 }
 
 export async function resolveDID(did: string): Promise<DIDDocument | null> {
-  const data = await fetchJson<unknown>(`${API_BASE}/api/did/${did}`);
+  const data = await fetchJson<unknown>(api.url(`/api/did/${did}`));
   const parsed = parseDIDRecordResponse(data);
   if (parsed?.document) {
     hydrateLocalFromRecord(did, parsed.document, parsed.metadata);
@@ -367,7 +367,7 @@ export async function registerDID(
   const persistedLocally = upsertLocalDID(didDocument, metadata);
 
   try {
-    const res = await fetch(`${API_BASE}/api/did`, {
+    const res = await fetch(api.url('/api/did'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ didDocument, metadata }),
@@ -407,7 +407,7 @@ export async function updateDIDDocument(
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/did/${did}`, {
+    const res = await fetch(api.url(`/api/did/${did}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ didDocument: updates }),
@@ -444,7 +444,7 @@ export async function revokeDID(did: string): Promise<boolean> {
   }
 
   try {
-    const res = await fetch(`${API_BASE}/api/did/${did}`, {
+    const res = await fetch(api.url(`/api/did/${did}`), {
       method: 'DELETE',
     });
     return res.ok || revokedLocally;
@@ -478,35 +478,44 @@ export async function verifyDIDOwnership(
       return false;
     }
 
-    // For did:key and did:ethr, the public key is in publicKeyHex or publicKeyJwk
-    const publicKeyHex = verificationMethod.publicKeyHex || verificationMethod.publicKeyBase58;
-
-    if (!publicKeyHex) {
-      logger.error('[DID] No public key found in verification method');
-      return false;
-    }
-
-    // Validate signature format (should be hex string starting with 0x)
-    if (!signature.startsWith('0x') || signature.length < 130) {
+    // Validate signature format.
+    if (!/^0x[0-9a-f]+$/i.test(signature) || signature.length < 12 || (signature.length - 2) % 2 !== 0) {
       logger.error('[DID] Invalid signature format');
       return false;
     }
 
-    // Import the public key from hex format
-    const publicKeyBytes = new Uint8Array(
-      publicKeyHex
-        .replace(/^0x/, '')
-        .match(/.{1,2}/g)
-        ?.map((byte) => parseInt(byte, 16)) || [],
-    );
+    let publicKey: CryptoKey;
+    if (verificationMethod.publicKeyJwk) {
+      publicKey = await crypto.subtle.importKey(
+        'jwk',
+        verificationMethod.publicKeyJwk,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['verify'],
+      );
+    } else {
+      const rawHex =
+        verificationMethod.publicKeyHex ||
+        (verificationMethod.publicKeyMultibase?.startsWith('0x')
+          ? verificationMethod.publicKeyMultibase
+          : '');
+      const normalized = rawHex.replace(/^0x/, '');
+      if (!/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2 !== 0) {
+        logger.error('[DID] No valid public key found in verification method');
+        return false;
+      }
 
-    const publicKey = await crypto.subtle.importKey(
-      'raw',
-      publicKeyBytes,
-      { name: 'ECDSA', namedCurve: 'P-256' },
-      false,
-      ['verify'],
-    );
+      const publicKeyBytes = new Uint8Array(
+        normalized.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
+      );
+      publicKey = await crypto.subtle.importKey(
+        'raw',
+        publicKeyBytes,
+        { name: 'ECDSA', namedCurve: 'P-256' },
+        false,
+        ['verify'],
+      );
+    }
 
     // Verify signature using cryptography service
     return await verifySignature(challenge, signature, publicKey);
@@ -561,7 +570,7 @@ export async function createVerifiablePresentation(
  * Get all DIDs from registry (for admin purposes)
  */
 export async function getAllDIDs(): Promise<Array<{ did: string; created: string; role: string }>> {
-  const remoteList = await fetchJson<unknown>(`${API_BASE}/api/did`);
+  const remoteList = await fetchJson<unknown>(api.url('/api/did'));
   const parsed = parseDIDIndexList(remoteList);
   if (parsed) {
     writeLocalDIDIndex(parsed);
@@ -583,7 +592,7 @@ export async function searchDIDsByRole(role: string): Promise<string[]> {
  * Get DID Metadata
  */
 export async function getDIDMetadata(did: string): Promise<DIDMetadata | null> {
-  const data = await fetchJson<unknown>(`${API_BASE}/api/did/${did}`);
+  const data = await fetchJson<unknown>(api.url(`/api/did/${did}`));
   const parsed = parseDIDRecordResponse(data);
   if (parsed?.metadata) {
     writeLocalJson(didMetadataKey(did), parsed.metadata);

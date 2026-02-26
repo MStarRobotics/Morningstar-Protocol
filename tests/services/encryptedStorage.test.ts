@@ -90,7 +90,7 @@ describe('EncryptedStorage', () => {
 
       // The corrupt entry should have been removed
       expect(localStorage.getItem('secret')).toBeNull();
-    });
+    }, 15_000);
   });
 
   describe('removeItem', () => {

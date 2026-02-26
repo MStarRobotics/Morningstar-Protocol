@@ -90,9 +90,9 @@ export const fetchAuditLogs = async (): Promise<AuditLog[]> => {
 export const fetchInstitutions = async (): Promise<Institution[]> => {
   await wait(600);
   return [
-    { address: "0xUni...2", name: "Polygon University", role: "ISSUER_ROLE", kycStatus: "verified", addedDate: "2023-01-15" },
-    { address: "0xAca...5", name: "Tech Academy", role: "ISSUER_ROLE", kycStatus: "verified", addedDate: "2023-03-10" },
-    { address: "0xNew...8", name: "New Age Institute", role: "NONE", kycStatus: "pending", addedDate: "2024-05-20" },
+    { id: "inst-polygon-university", address: "0xUni...2", name: "Polygon University", role: "ISSUER_ROLE", kycStatus: "verified", addedDate: "2023-01-15" },
+    { id: "inst-tech-academy", address: "0xAca...5", name: "Tech Academy", role: "ISSUER_ROLE", kycStatus: "verified", addedDate: "2023-03-10" },
+    { id: "inst-new-age-institute", address: "0xNew...8", name: "New Age Institute", role: "NONE", kycStatus: "pending", addedDate: "2024-05-20" },
   ];
 };
 

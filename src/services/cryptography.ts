@@ -33,6 +33,7 @@ export async function sha256(message: string): Promise<string> {
 export async function generateKeyPair(): Promise<{
   publicKey: CryptoKey;
   privateKey: CryptoKey;
+  publicKeyJwk: JsonWebKey;
   publicKeyHex: string;
 }> {
   try {
@@ -45,15 +46,17 @@ export async function generateKeyPair(): Promise<{
       ['sign', 'verify']
     );
 
-    // Export public key for display
+    // Export public key in multiple interoperable formats.
     const publicKeyBuffer = await crypto.subtle.exportKey('raw', keyPair.publicKey);
     const publicKeyArray = Array.from(new Uint8Array(publicKeyBuffer));
     const publicKeyHex = publicKeyArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const publicKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
 
     return {
       publicKey: keyPair.publicKey,
       privateKey: keyPair.privateKey,
-      publicKeyHex: '0x' + publicKeyHex.slice(0, 40) // Shortened for display
+      publicKeyJwk,
+      publicKeyHex: '0x' + publicKeyHex
     };
   } catch (error) {
     throw new CryptoError('Key generation failed: Web Crypto API unavailable or unsupported', {

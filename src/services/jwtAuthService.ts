@@ -19,7 +19,11 @@ class JWTAuthService {
   private readonly defaultIssuer = 'morningstar-credentials';
 
   constructor() {
-    this.secret = import.meta.env.VITE_JWT_SECRET || 'dev-secret-key-change-in-production';
+    if (import.meta.env.PROD) {
+      throw new Error('jwtAuthService is disabled in production. Use backend-issued auth tokens.');
+    }
+
+    this.secret = import.meta.env.VITE_JWT_SECRET || 'dev-only-jwt-secret';
   }
 
   generateToken(payload: Omit<JWTPayload, 'iat' | 'exp' | 'iss'>, options?: JWTOptions): string {
